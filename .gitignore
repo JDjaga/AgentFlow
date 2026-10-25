@@ -45,3 +45,6 @@ ollama_models/
 
 # Tesseract
 *.traineddata
+
+# Documentation (local only)
+explanation/
