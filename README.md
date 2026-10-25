@@ -4,6 +4,12 @@
 
 ---
 
+## Dashboard Preview
+
+![n8n Workflow](n8n.png)
+
+---
+
 ## What This Project Demonstrates
 
 | Skill Area | Implementation |
