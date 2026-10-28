@@ -19,7 +19,7 @@ import os
 import json
 import psycopg2
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,6 +27,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from loguru import logger
+
+from llm_config import llm_manager
+import scheduler
 
 load_dotenv()
 
@@ -60,6 +63,31 @@ def serve_architecture():
     return FileResponse(os.path.join(_static_dir, "architecture.html"))
 
 
+@app.on_event("startup")
+def _startup():
+    """Cloud bootstrap: create tables if the DB is fresh, then restore state.
+
+    On Neon/Supabase/Render the database starts EMPTY, so we must apply
+    database/init.sql before anything queries it. Safe to run every boot.
+    """
+    try:
+        from migrations.run import migrate
+        migrate()
+    except Exception as e:
+        logger.warning(f"Schema migration skipped: {e}")
+
+    """Restore the last-run snapshot from Postgres after a restart.
+
+    Without this, every Render deploy / crash would blank the dashboard's
+    live-output panel even though the DB still holds all the leads.
+    """
+    try:
+        import crew  # lazy — heavy (crewai) import
+        crew.hydrate_last_run_from_db()
+    except Exception as e:
+        logger.warning(f"LAST_RUN hydration skipped: {e}")
+
+
 # ─── Request / Response Models ────────────────────────────────────────────────
 
 class PipelineRequest(BaseModel):
@@ -79,13 +107,10 @@ class ApprovalRequest(BaseModel):
 # ─── DB Helper ────────────────────────────────────────────────────────────────
 
 def get_db():
-    return psycopg2.connect(
-        host=os.getenv("POSTGRES_HOST",     "localhost"),
-        port=int(os.getenv("POSTGRES_PORT",  5432)),
-        dbname=os.getenv("POSTGRES_DB",      "agentflow_db"),
-        user=os.getenv("POSTGRES_USER",      "agentflow"),
-        password=os.getenv("POSTGRES_PASSWORD", "agentflow_secret"),
-    )
+    # Cloud-ready: honours DATABASE_URL (Neon/Supabase) or POSTGRES_* vars,
+    # and applies sslmode=require for remote hosts. See db_config.py.
+    from db_config import get_conn
+    return get_conn()
 
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
@@ -159,7 +184,9 @@ def list_runs(limit: int = 10):
         return {"runs": runs, "total": len(runs)}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Production-friendly: DB may be down/sleeping. Return empty, don't 500.
+        logger.warning(f"/runs unavailable (DB down?): {e}")
+        return {"runs": [], "total": 0, "db_available": False}
 
 
 @app.get("/leads")
@@ -170,9 +197,9 @@ def list_leads(status: str = None, limit: int = 20):
         cur  = conn.cursor()
 
         query = """
-            SELECT l.full_name, l.job_title, l.company, l.industry,
-                   o.subject_line, o.status, o.security_score, o.rejection_reason,
-                   o.created_at
+            SELECT l.full_name, l.job_title, l.company, l.industry, l.location,
+                   o.subject_line, o.message, o.status, o.security_score,
+                   o.rejection_reason, o.created_at
             FROM leads l
             JOIN outreach o ON l.id = o.lead_id
         """
@@ -184,8 +211,8 @@ def list_leads(status: str = None, limit: int = 20):
         params.append(limit)
 
         cur.execute(query, params)
-        columns = ["full_name", "job_title", "company", "industry",
-                   "subject_line", "status", "security_score",
+        columns = ["full_name", "job_title", "company", "industry", "location",
+                   "subject_line", "message", "status", "security_score",
                    "rejection_reason", "created_at"]
         leads = [dict(zip(columns, row)) for row in cur.fetchall()]
 
@@ -198,7 +225,9 @@ def list_leads(status: str = None, limit: int = 20):
         return {"leads": leads, "total": len(leads)}
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # Production-friendly: DB may be down/sleeping. Return empty, don't 500.
+        logger.warning(f"/leads unavailable (DB down?): {e}")
+        return {"leads": [], "total": 0, "db_available": False}
 
 
 @app.post("/approve")
@@ -225,3 +254,188 @@ def approve_outreach(request: ApprovalRequest):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ─── Content Generation (Phase 5 — AI content tooling) ────────────────────────
+
+class ContentRequest(BaseModel):
+    topic:    str
+    platform: str = "email"       # email | twitter | linkedin | blog
+    tone:     str = "conversational"
+    variants: int = 2
+
+
+@app.post("/content")
+def generate_content(request: ContentRequest):
+    """
+    Uses the active LLM (Claude/GPT/Gemini/OpenRouter/Ollama via fallback chain)
+    to generate marketing content variants. Demonstrates AI content tooling.
+    """
+    logger.info(f"Content generation | topic={request.topic!r} | platform={request.platform}")
+
+    prompt = (
+        f"Write {request.variants} short {request.platform} content variant(s) about: "
+        f"{request.topic}. Tone: {request.tone}. Keep each under 60 words, "
+        f"engaging, no hashtags spam. Return as a JSON array of strings."
+    )
+    try:
+        raw = llm_manager.complete(
+            prompt,
+            system="You are a concise B2B content writer. Return only the JSON array.",
+            max_tokens=600,
+            temperature=0.7,
+        )
+        import json, re
+        m = re.search(r"\[.*\]", raw, re.DOTALL)
+        variants = json.loads(m.group()) if m else [raw]
+        return {
+            "status":   "ok",
+            "provider": llm_manager.get_crewai_llm(),
+            "topic":    request.topic,
+            "platform": request.platform,
+            "content":  variants,
+        }
+    except Exception as e:
+        logger.error(f"Content generation failed: {e}")
+        raise HTTPException(status_code=503, detail=f"LLM unavailable: {e}")
+
+
+@app.get("/providers")
+def list_providers():
+    """Shows the configured LLM provider chain + which one is active. Handy for ops/debug."""
+    active = llm_manager.resolve()
+    return {
+        "chain":   llm_manager.providers,
+        "active":  active.spec.name if active else None,
+        "model":   active.model if active else None,
+        "timeout": llm_manager.timeout,
+    }
+
+
+# ─── Scheduling (Design A — n8n polls /jobs/due) ──────────────────────────────
+
+class ScheduleRequest(BaseModel):
+    industry:  str = "SaaS"
+    job_title: str = "Head of Growth"
+    location:  str = "United States"
+    limit:     int = 5
+    schedule_kind: str = "once"             # once | daily
+    run_in_minutes: Optional[int] = None    # relative (e.g. 30 → "in 30 min")
+    time_of_day:    Optional[str] = None    # "08:00" for a specific/daily time
+
+
+class TriggerAck(BaseModel):
+    failed: bool = False
+
+
+def _compute_run_at(req: ScheduleRequest):
+    """Turn the user's schedule input into an absolute next-run datetime."""
+    now = datetime.now()
+    if req.run_in_minutes is not None:
+        return now + timedelta(minutes=max(0, req.run_in_minutes)), "once", None
+    if req.time_of_day:
+        try:
+            hh, mm = [int(x) for x in req.time_of_day.split(":")[:2]]
+        except Exception:
+            hh, mm = 9, 0
+        candidate = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+        if candidate <= now:
+            candidate += timedelta(days=1)
+        kind = "daily" if req.schedule_kind == "daily" else "once"
+        return candidate, kind, f"{hh:02d}:{mm:02d}"
+    # default: fire 10 minutes from now
+    return now + timedelta(minutes=10), "once", None
+
+
+@app.post("/schedule")
+def schedule_run(request: ScheduleRequest):
+    """Save a scheduled pipeline run. n8n polls /jobs/due and triggers it later."""
+    run_at, kind, tod = _compute_run_at(request)
+    job = scheduler.create_job(
+        industry=request.industry, job_title=request.job_title,
+        location=request.location, limit=request.limit,
+        schedule_kind=kind, run_at=run_at, time_of_day=tod,
+    )
+    logger.info(f"Job scheduled: kind={kind} run_at={run_at} store={job.get('store')}")
+    return {
+        "status":  "scheduled",
+        "job":     job,
+        "message": f"Run scheduled for {run_at:%Y-%m-%d %H:%M} ({kind})",
+    }
+
+
+@app.get("/jobs")
+def get_jobs(limit: int = 50):
+    """List all scheduled jobs (for the dashboard schedule panel)."""
+    jobs = scheduler.list_jobs(limit=limit)
+    return {"jobs": jobs, "total": len(jobs)}
+
+
+@app.get("/jobs/due")
+def get_due_jobs():
+    """
+    Called by n8n every few minutes (Design A). Returns any pending jobs whose
+    fire time has arrived so n8n can POST /run for each and then acknowledge.
+    """
+    jobs = scheduler.due_jobs()
+    return {"jobs": jobs, "total": len(jobs), "checked_at": datetime.now().isoformat()}
+
+
+@app.post("/jobs/{job_id}/triggered")
+def acknowledge_job(job_id: int, ack: TriggerAck):
+    """n8n calls this after firing a job. Rolls daily jobs to their next run."""
+    ok = scheduler.mark_triggered(job_id, failed=ack.failed)
+    if not ok:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    return {"status": "acknowledged", "job_id": job_id, "failed": ack.failed}
+
+
+@app.post("/scheduler/tick")
+async def scheduler_tick(background_tasks: BackgroundTasks):
+    """
+    Self-contained scheduler tick — the n8n scheduled branch, without n8n.
+
+    Locally, n8n runs this exact sequence every 5 minutes:
+      GET /jobs/due → POST /run per due job → POST /jobs/{id}/triggered.
+    Hosting n8n is OPTIONAL: point any free external cron (e.g. cron-job.org,
+    no credit card) at this endpoint every 5 minutes and user-set times still
+    re-fire the pipeline in the cloud exactly as they do locally. The n8n
+    workflow keeps working too — whichever fires first marks the job done,
+    so a job can never double-fire.
+    """
+    jobs = scheduler.due_jobs()
+    fired = []
+    for job in jobs:
+        from crew import run_pipeline as execute_pipeline
+        background_tasks.add_task(
+            execute_pipeline,
+            industry=job.get("industry"),
+            job_title=job.get("job_title"),
+            location=job.get("location"),
+            limit=int(job.get("limit") or 5),
+            trigger="schedule",
+        )
+        # Acknowledge immediately (same semantics as n8n: POST /run only
+        # schedules the background task, so a failure here isn't silent —
+        # daily jobs roll forward and 'once' jobs go to done either way).
+        scheduler.mark_triggered(job["id"])
+        fired.append(job["id"])
+        logger.info(f"Scheduler tick fired job {job['id']} "
+                    f"({job.get('industry')}/{job.get('job_title')})")
+
+    return {
+        "status":     "ok",
+        "due":        len(jobs),
+        "fired":      fired,
+        "checked_at": datetime.now().isoformat(),
+    }
+
+
+@app.get("/last-run")
+def get_last_run_state():
+    """
+    Latest pipeline output from memory (works even without a DB). The dashboard
+    polls this after clicking 'Run' to show real agent output + security scores.
+    """
+    import crew  # lazy — avoids circular import at startup
+    return {"run": crew.get_last_run()}

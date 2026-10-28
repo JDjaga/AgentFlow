@@ -1,4 +1,5 @@
 {
+  "id": "agentflow-pipeline-001",
   "name": "AgentFlow Pipeline",
   "nodes": [
     {
@@ -30,7 +31,7 @@
     {
       "parameters": {
         "method": "GET",
-        "url": "http://172.17.0.1:8001/status",
+        "url": "={{ ($env.AGENTFLOW_API_URL || 'http://host.docker.internal:8001') + '/status' }}",
         "options": {}
       },
       "id": "health-check",
@@ -42,25 +43,28 @@
     {
       "parameters": {
         "conditions": {
-          "string": [
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
             {
-              "value1": "={{ $json.status }}",
-              "operation": "equals",
-              "value2": "ok"
+              "id": "cond-server-ok",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "ok",
+              "operator": { "type": "string", "operation": "equals" }
             }
-          ]
+          ],
+          "combinator": "and"
         }
       },
       "id": "check-status",
       "name": "Server OK?",
       "type": "n8n-nodes-base.if",
-      "typeVersion": 1,
+      "typeVersion": 2,
       "position": [680, 390]
     },
     {
       "parameters": {
         "method": "POST",
-        "url": "http://172.17.0.1:8001/run",
+        "url": "={{ ($env.AGENTFLOW_API_URL || 'http://host.docker.internal:8001') + '/run' }}",
         "sendBody": true,
         "bodyParameters": {
           "parameters": [
@@ -81,38 +85,90 @@
     },
     {
       "parameters": {
-        "waitBetweenTries": 30000,
-        "maxTries": 10,
-        "conditions": {
-          "string": [
-            {
-              "value1": "={{ $json.runs[0].status }}",
-              "operation": "equals",
-              "value2": "completed"
-            }
-          ]
-        },
-        "pollTimes": {
-          "item": [{ "mode": "everyX", "value": 30, "unit": "seconds" }]
-        }
+        "amount": 30,
+        "unit": "seconds"
       },
       "id": "wait-complete",
-      "name": "Wait for Completion",
+      "name": "Wait 30s (Poll Interval)",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1,
-      "position": [900, 300]
+      "position": [1120, 300]
     },
     {
       "parameters": {
         "method": "GET",
-        "url": "http://172.17.0.1:8001/leads?status=approved&limit=20",
+        "url": "={{ ($env.AGENTFLOW_API_URL || 'http://host.docker.internal:8001') + '/runs?limit=1' }}",
+        "options": {}
+      },
+      "id": "check-run-status",
+      "name": "Check Run Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "cond-run-complete",
+              "leftValue": "={{ $json.runs[0].status }}",
+              "rightValue": "completed",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "run-complete",
+      "name": "Run Complete?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Increment the poll counter so we never loop forever.\nconst item = $input.first().json;\nconst attempts = (item.__poll_attempts || 0) + 1;\nreturn [{ json: { ...item, __poll_attempts: attempts } }];"
+      },
+      "id": "increment-counter",
+      "name": "Increment Poll Counter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 480]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "cond-retries-left",
+              "leftValue": "={{ $json.__poll_attempts }}",
+              "rightValue": 10,
+              "operator": { "type": "number", "operation": "lte" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "max-retries",
+      "name": "Retries Left?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2000, 480]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ ($env.AGENTFLOW_API_URL || 'http://host.docker.internal:8001') + '/leads?status=approved&limit=20' }}",
         "options": {}
       },
       "id": "fetch-results",
       "name": "Fetch Approved Leads",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4,
-      "position": [1120, 300]
+      "position": [2220, 300]
     },
     {
       "parameters": {
@@ -122,7 +178,7 @@
       "name": "Summarise Results",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1340, 300]
+      "position": [2440, 300]
     },
     {
       "parameters": {
@@ -133,7 +189,7 @@
       "name": "Respond to Webhook",
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1,
-      "position": [1560, 300]
+      "position": [2660, 300]
     },
     {
       "parameters": {
@@ -145,6 +201,102 @@
       "type": "n8n-nodes-base.noOp",
       "typeVersion": 1,
       "position": [900, 480]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "seconds", "secondsInterval": 300 }]
+        }
+      },
+      "id": "job-poll-trigger",
+      "name": "Poll Scheduled Jobs (Every 5 min)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 700]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ ($env.AGENTFLOW_API_URL || 'http://host.docker.internal:8001') + '/jobs/due' }}",
+        "options": {}
+      },
+      "id": "check-due-jobs",
+      "name": "Check Due Jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [460, 700]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "loose", "version": 2 },
+          "conditions": [
+            {
+              "id": "cond-any-due",
+              "leftValue": "={{ $json.total }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "any-due-jobs",
+      "name": "Any Jobs Due?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 700]
+    },
+    {
+      "parameters": {
+        "jsCode": "// One output item per due job so each fires its own pipeline run.\nconst jobs = $input.first().json.jobs || [];\nreturn jobs.map(j => ({ json: j }));"
+      },
+      "id": "split-jobs",
+      "name": "Split Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 620]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.AGENTFLOW_API_URL || 'http://host.docker.internal:8001') + '/run' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ industry: $json.industry || 'SaaS', job_title: $json.job_title || 'Head of Growth', location: $json.location || 'United States', limit: Number($json.limit) || 5, trigger: 'n8n_schedule' }) }}",
+        "options": {}
+      },
+      "id": "run-due-job",
+      "name": "Trigger Due Job",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1120, 620]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.AGENTFLOW_API_URL || 'http://host.docker.internal:8001') + '/jobs/' + $('Split Jobs').item.json.id + '/triggered' }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"failed\":false}",
+        "options": {}
+      },
+      "id": "ack-job",
+      "name": "Mark Job Triggered",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1340, 620]
+    },
+    {
+      "parameters": {
+        "message": "No scheduled jobs due — nothing to trigger.",
+        "options": {}
+      },
+      "id": "no-jobs-due",
+      "name": "No Jobs Due",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [900, 780]
     }
   ],
   "connections": {
@@ -164,13 +316,52 @@
       ]
     },
     "Trigger SMAGGE Pipeline": {
-      "main": [[{ "node": "Fetch Approved Leads", "type": "main", "index": 0 }]]
+      "main": [[{ "node": "Wait 30s (Poll Interval)", "type": "main", "index": 0 }]]
+    },
+    "Wait 30s (Poll Interval)": {
+      "main": [[{ "node": "Check Run Status", "type": "main", "index": 0 }]]
+    },
+    "Check Run Status": {
+      "main": [[{ "node": "Run Complete?", "type": "main", "index": 0 }]]
+    },
+    "Run Complete?": {
+      "main": [
+        [{ "node": "Fetch Approved Leads", "type": "main", "index": 0 }],
+        [{ "node": "Increment Poll Counter", "type": "main", "index": 0 }]
+      ]
+    },
+    "Increment Poll Counter": {
+      "main": [[{ "node": "Retries Left?", "type": "main", "index": 0 }]]
+    },
+    "Retries Left?": {
+      "main": [
+        [{ "node": "Wait 30s (Poll Interval)", "type": "main", "index": 0 }],
+        [{ "node": "Fetch Approved Leads", "type": "main", "index": 0 }]
+      ]
     },
     "Fetch Approved Leads": {
       "main": [[{ "node": "Summarise Results", "type": "main", "index": 0 }]]
     },
     "Summarise Results": {
       "main": [[{ "node": "Respond to Webhook", "type": "main", "index": 0 }]]
+    },
+    "Poll Scheduled Jobs (Every 5 min)": {
+      "main": [[{ "node": "Check Due Jobs", "type": "main", "index": 0 }]]
+    },
+    "Check Due Jobs": {
+      "main": [[{ "node": "Any Jobs Due?", "type": "main", "index": 0 }]]
+    },
+    "Any Jobs Due?": {
+      "main": [
+        [{ "node": "Split Jobs",     "type": "main", "index": 0 }],
+        [{ "node": "No Jobs Due",    "type": "main", "index": 0 }]
+      ]
+    },
+    "Split Jobs": {
+      "main": [[{ "node": "Trigger Due Job", "type": "main", "index": 0 }]]
+    },
+    "Trigger Due Job": {
+      "main": [[{ "node": "Mark Job Triggered", "type": "main", "index": 0 }]]
     }
   },
   "settings": {

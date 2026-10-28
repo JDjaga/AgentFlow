@@ -174,23 +174,46 @@ Messages scoring below 70/100 are automatically rejected and logged.
 The `security/guardrails/` folder documents how this maps to a [NeMo Guardrails](https://github.com/NVIDIA/NeMo-Guardrails) integration pattern (C++ build tools required on Windows — implemented natively instead).
 
 ### Phase 3 — Automation & Feedback Loop
-- **FastAPI server** exposes `/run`, `/status`, `/leads`, `/runs`, `/approve` endpoints
-- **n8n workflow** triggers the pipeline on a daily 9AM schedule (Mon–Fri) and via webhook
+- **FastAPI server** exposes `/run`, `/status`, `/leads`, `/runs`, `/approve`, `/schedule`, `/jobs`, `/jobs/due`, `/last-run` endpoints
+- **Scheduling (Design A)** — jobs the user schedules live in PostgreSQL (in-memory fallback if the DB is down). **n8n polls `GET /jobs/due` every 5 minutes** and, when a job is due, POSTs `/run` with that job's parameters, then marks it fired via `/jobs/{id}/triggered`. Times the user picks genuinely cause n8n to re-fire the pipeline — nothing is hardcoded.
 - **Feedback loop** queries previously rejected messages from PostgreSQL and injects them into the Writer agent's context so it learns from past mistakes
 
 ### Phase 4 — Dashboard & Portfolio
 - Live HTML/JS dashboard served via FastAPI at `/dashboard`
-- 4 working pages: Dashboard, Leads, Security Logs, Settings
+- Pages: Dashboard (live run output + Run Analytics), Leads, Security Logs, **Download** (Power BI–style decision intelligence), Settings
+- **Download page** — slicer filters (industry / job title / location / interest level), KPI strip, industry donut, job-title & location bars, **Decision Interest Levels** (highly interested / recommended / medium / low / no interest, derived from Guard's security score + approval), score spread, company leaderboard, leads-over-time trend and the drafted outreach messages
+- **Download PDF** — one click captures the whole decision report via html2canvas + jsPDF (multi-page A4); falls back to the browser print dialog ("Save as PDF") if the CDN is unreachable
+- Responsive/mobile: off-canvas sidebar with hamburger below 900px, grids collapse 4→2→1, tables scroll horizontally, canvases redraw on resize; a print stylesheet prints only the active page
 - Approve / Reject buttons feed back into the pipeline via `/approve`
 - Settings page includes a "Run Pipeline Now" button
-- Auto-refreshes every 30 seconds; falls back to mock data when API is offline
+- Auto-refreshes every 30 seconds; on server restart the last run is **re-hydrated from PostgreSQL**, so the dashboard is never blank after a deploy
+- Everything shown comes from real agent/n8n runs — no mock/demo data anywhere
 
 ---
 
 ## Environment Variables
 
 ```env
-# LLM
+# ── LLM Provider Chain (cloud-hostable) ────────────────────────────────
+# Priority order. First healthy provider wins; rest are automatic fallbacks
+# on timeout/error. Set to 'ollama' only for local/offline dev.
+LLM_PROVIDERS=openrouter,groq,huggingface,ollama
+LLM_TIMEOUT=25
+
+# OpenRouter (primary)
+OPENROUTER_API_KEY=your_key_here
+OPENROUTER_MODEL=meta-llama/llama-3.3-70b-instruct
+
+# Groq (fastest free fallback)
+GROQ_API_KEY=your_key_here
+GROQ_MODEL=llama-3.3-70b-versatile
+
+# Hugging Face (backup — free Inference Providers)
+HUGGINGFACEHUB_API_TOKEN=your_hf_token_here
+HF_MODEL=meta-llama/Llama-3.3-70B-Instruct
+
+# Ollama (optional local fallback)
+OLLAMA_BASE_URL=http://localhost:11434
 OLLAMA_MODEL=llama3.2
 
 # Lead Source: mock | apollo | hunter
@@ -217,6 +240,91 @@ POSTGRES_PASSWORD=agentflow_secret
 # Tesseract (Windows)
 TESSERACT_PATH=C:\Program Files\Tesseract-OCR
 ```
+
+---
+
+## LLM Failover (why it's cloud-hostable)
+
+Every LLM call — the 3 CrewAI agents **and** the security checks — routes through
+`llm_config.py`. It probes providers in `LLM_PROVIDERS` order, caches the fastest
+healthy one, and **fails over automatically** when a provider times out or errors:
+
+```
+openrouter ──(slow/down)──▶ groq ──▶ huggingface ──▶ ollama (local)
+     ▲                        ▲
+  primary                fastest free
+```
+
+This removes the hard dependency on local Ollama, so the pipeline runs on any
+cloud host that can reach the internet.
+
+---
+
+## Deploying (cloud, free tier — **no credit/debit card**)
+
+> **📖 Full step-by-step guide: [HOSTING.md](HOSTING.md)** (Render + Neon + free
+> cron, ~10 minutes). Everything below is the short version.
+
+Netlify **cannot** host this backend (no Python runtime / DB / long requests).
+The stack that works — all free-tier, **email sign-up only, no card**:
+
+| Piece | Free host | How |
+|---|---|---|
+| FastAPI + agents + dashboard | **Render.com** | `render.yaml` in repo → New ▸ Blueprint; serves `/dashboard` on the same origin |
+| PostgreSQL | **Neon / Supabase** | set `DATABASE_URL` (parsed + `sslmode=require` by `db_config.py`) |
+| LLMs | **OpenRouter / Groq / HF** | set keys in Render env vars (`LLM_PROVIDERS` preset in `render.yaml`) |
+| Scheduler | **cron-job.org** *or* local n8n | free cron POSTs `/scheduler/tick` every 5 min — no n8n hosting needed |
+| Dashboard | Render (bundled) | never split-host it: the page uses `location.origin`, so it must sit on the same host as the API |
+
+On startup the app auto-migrates an empty cloud DB (`migrations/run.py`) and
+hydrates the dashboard's last run from Postgres, so a fresh deploy shows real
+data instead of blanks. `Procfile` + `render.yaml` are included; build command
+`pip install -r requirements.txt`, start `uvicorn api.server:app --host 0.0.0.0 --port $PORT`.
+
+> Note: Render free tier sleeps after ~15 min idle (first wake-up ~30–50 s) and
+> may kill very long runs. The 5-minute scheduler poll keeps it awake during
+> the day; see HOSTING.md for an uptime-monitor trick to keep it on 24/7.
+
+---
+
+## n8n workflow — import & activate
+
+The workflow (`n8n/agentflow_workflow.json`) uses the **modern IF-node schema**
+(`parameters.conditions` + `typeVersion 2`) and polls the FastAPI job queue.
+
+**Importing a workflow deactivates it** in n8n, so after every import you must
+re-activate it — otherwise nothing fires:
+
+```bash
+# 1. Import the workflow (UI: Workflows ▸ Import from File, or CLI:)
+n8n import:workflow --input=n8n/agentflow_workflow.json
+
+# 2. Re-activate it (import leaves it inactive!)
+n8n update:workflow --id=agentflow-pipeline-001 --active=true
+```
+
+Then restart n8n (`docker-compose restart n8n`) and confirm the workflow shows
+as **Active**. Every HTTP URL in the workflow reads
+`={{ ($env.AGENTFLOW_API_URL || 'http://host.docker.internal:8001') + ... }}` —
+so set `AGENTFLOW_API_URL=https://<your-app>.onrender.com` in n8n's env to drive
+the **hosted** API, or leave it unset to keep driving localhost. Verify the
+chain end-to-end:
+
+1. Schedule a run from the dashboard (Settings ▸ schedule) or wait for the
+   5-minute poll.
+2. `GET /jobs/due` returns the due job → n8n POSTs `/run` → crew runs →
+   `/jobs/{id}/triggered` marks it fired.
+3. Check the run appears in the dashboard's Run History with trigger source
+   `n8n`.
+
+> **Hosting without n8n:** `POST /scheduler/tick` performs that same
+> check → fire → acknowledge sequence inside the API. Point any free cron
+> (e.g. cron-job.org) at it every 5 minutes and schedules work in the cloud
+> with zero n8n hosting. If both n8n and a cron run, whichever fires first
+> marks the job done — jobs can never double-fire.
+
+> If you edit the IF nodes in the n8n UI, keep the modern schema — legacy IF
+> parameters (`conditions.boolean` arrays) silently break the due-job branch.
 
 ---
 

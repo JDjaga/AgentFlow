@@ -13,6 +13,7 @@ Tools:    OCRTool (Tesseract-powered image text extraction)
 import os
 from crewai import Agent
 from tools.ocr_tool import OCRTool
+from llm_config import llm_manager
 from loguru import logger
 
 
@@ -45,10 +46,9 @@ def build_analyst() -> Agent:
     )
 
 
-def _get_llm() -> str:
+def _get_llm():
     """
-    Returns the LLM identifier string for CrewAI 1.x (LiteLLM format).
-    Phase 2 will have Ollama running locally.
+    Returns the LLM for the Analyst via the provider manager (llm_config).
+    Uses LLM_PROVIDERS priority chain with timeout-based failover.
     """
-    model = os.getenv("OLLAMA_MODEL", "llama3.2")
-    return f"ollama/{model}"
+    return llm_manager.get_crewai_llm()

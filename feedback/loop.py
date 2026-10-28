@@ -23,13 +23,9 @@ class FeedbackLoop:
     """Pulls rejection history from DB and formats it for the Writer agent."""
 
     def __init__(self):
-        self.db_config = {
-            "host":     os.getenv("POSTGRES_HOST",     "localhost"),
-            "port":     int(os.getenv("POSTGRES_PORT", 5432)),
-            "dbname":   os.getenv("POSTGRES_DB",       "agentflow_db"),
-            "user":     os.getenv("POSTGRES_USER",     "agentflow"),
-            "password": os.getenv("POSTGRES_PASSWORD", "agentflow_secret"),
-        }
+        # Cloud-ready: honours DATABASE_URL (Neon/Supabase) or POSTGRES_* vars.
+        from db_config import db_kwargs
+        self.db_config = db_kwargs()
 
     def get_feedback_context(self, limit: int = 10) -> str:
         """

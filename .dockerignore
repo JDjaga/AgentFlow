@@ -1,0 +1,13 @@
+# Keep the Docker image lean — exclude dev/local artifacts
+.git
+.github
+.vscode
+__pycache__/
+*.pyc
+venv/
+.env
+server*.log
+explanation/
+tests/
+*.png
+n8n.png

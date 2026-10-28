@@ -76,6 +76,52 @@ body { font-family:'Inter',sans-serif; background:#f8f9ff; color:#0b1c30; margin
 canvas { display:block; }
 @keyframes spin { to{transform:rotate(360deg)} }
 .spin { animation:spin 1s linear infinite; display:inline-block; }
+/* Analytics: 4-up on desktop, 2-up when the viewport is narrow */
+@media (max-width: 1100px) { #analytics-grid { grid-template-columns:repeat(2,1fr) !important; } }
+
+/* ═══════════ RESPONSIVE / MOBILE ═══════════ */
+.menu-btn { display:none !important; }
+#sidebar-overlay { display:none; position:fixed; inset:0; background:rgba(11,28,48,.45); z-index:85; }
+@media (max-width: 1100px) {
+  /* every inline 4-col grid → 2-col */
+  [style*="grid-template-columns:repeat(4,1fr)"] { grid-template-columns:repeat(2,1fr) !important; }
+  /* leads+log split → stacked */
+  [style*="grid-template-columns:2fr 1fr"] { grid-template-columns:1fr !important; }
+  /* Download KPI strip: 6-up → 3-up */
+  #dl-kpis { grid-template-columns:repeat(3,1fr) !important; }
+}
+@media (max-width: 760px) {
+  /* Download chart cards stack full-width (12-col grid stays, children span all 12) */
+  #page-download [style*="grid-column:span 4"],
+  #page-download [style*="grid-column:span 5"],
+  #page-download [style*="grid-column:span 7"] { grid-column:span 12 !important; }
+  #dl-kpis { grid-template-columns:repeat(2,1fr) !important; }
+}
+@media (max-width: 900px) {
+  /* off-canvas sidebar */
+  #sidebar { transform:translateX(-100%); transition:transform .25s ease; z-index:95; }
+  #sidebar.open { transform:translateX(0); }
+  #sidebar-overlay.show { display:block; }
+  main[style*="margin-left:260px"] { margin-left:0 !important; }
+  .menu-btn { display:flex !important; }
+  header[style*="padding:0 32px"] { padding:0 12px !important; }
+}
+@media (max-width: 700px) {
+  [style*="grid-template-columns:repeat(4,1fr)"] { grid-template-columns:1fr !important; }
+  #analytics-grid { grid-template-columns:1fr !important; }
+  /* tables scroll sideways instead of squashing */
+  .tbl-wrap { overflow-x:auto !important; }
+  .tbl-wrap table { min-width:600px; }
+  main > div[style*="padding:32px"] { padding:16px !important; }
+  h1 { font-size:20px !important; }
+}
+/* Print / Save-as-PDF fallback: only the active page */
+@media print {
+  header, aside, #sidebar-overlay, #toast, .no-print { display:none !important; }
+  main { margin:0 !important; padding:0 !important; }
+  .page { display:none !important; }
+  .page.active { display:block !important; }
+}
 </style>
 </head>
 <body>
@@ -83,6 +129,9 @@ canvas { display:block; }
 <!-- ═══════════════════════════ TOP NAV ═══════════════════════════════════ -->
 <header style="position:fixed;top:0;left:0;right:0;height:64px;background:#fff;border-bottom:1px solid #c7c4d7;display:flex;align-items:center;justify-content:space-between;padding:0 32px;z-index:100;">
   <div style="display:flex;align-items:center;gap:12px;">
+    <button class="menu-btn" onclick="toggleSidebar()" aria-label="Menu" style="background:none;border:none;cursor:pointer;padding:6px;border-radius:8px;align-items:center;justify-content:center;">
+      <span class="material-symbols-outlined" style="color:#464554;font-size:24px;">menu</span>
+    </button>
     <div style="width:32px;height:32px;background:#4648d4;border-radius:8px;display:flex;align-items:center;justify-content:center;">
       <span class="material-symbols-outlined fill-icon" style="color:#fff;font-size:18px;">rocket_launch</span>
     </div>
@@ -171,6 +220,9 @@ canvas { display:block; }
     <a class="nav-link" id="nav-security" onclick="navigate('security')">
       <span class="material-symbols-outlined" style="font-size:20px;">security</span> Security Logs
     </a>
+    <a class="nav-link" id="nav-download" onclick="navigate('download')">
+      <span class="material-symbols-outlined" style="font-size:20px;">download</span> Download
+    </a>
     <a class="nav-link" id="nav-settings" onclick="navigate('settings')">
       <span class="material-symbols-outlined" style="font-size:20px;">settings</span> Settings
     </a>
@@ -191,6 +243,7 @@ canvas { display:block; }
     </a>
   </div>
 </aside>
+<div id="sidebar-overlay" onclick="toggleSidebar()"></div>
 
 <!-- ═══════════════════════════ MAIN CONTENT ═════════════════════════════ -->
 <main style="margin-left:260px;padding-top:64px;min-height:100vh;background:#f8f9ff;">
@@ -208,6 +261,137 @@ canvas { display:block; }
     </button>
   </div>
 
+  <!-- ▶ AI Agent Runner — user input → run now / schedule (n8n) -->
+  <div class="card" style="padding:24px;margin-bottom:28px;border:1px solid #c7c4d7;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;gap:12px;flex-wrap:wrap;">
+      <div>
+        <span style="font-size:18px;font-weight:600;">🤖 Run the AI Agents</span>
+        <p style="font-size:13px;color:#464554;margin:4px 0 0;max-width:640px;">
+          Enter your target market. <b>Scout</b> finds leads → <b>Analyst</b> researches → <b>Writer</b> drafts outreach → <b>Guard</b> scores it for safety. Run now, or schedule it and <b>n8n</b> triggers it automatically.
+        </p>
+      </div>
+      <span class="tag" id="agent-status" style="background:#ede9fe;color:#4648d4;white-space:nowrap;">● Idle</span>
+    </div>
+
+    <!-- Target inputs -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px;">
+      <div>
+        <label style="font-size:11px;font-weight:600;color:#464554;text-transform:uppercase;letter-spacing:.05em;">Industry</label>
+        <select id="ag-industry" style="width:100%;padding:9px 12px;border:1px solid #c7c4d7;border-radius:8px;font-size:13px;margin-top:4px;box-sizing:border-box;background:#fff;cursor:pointer;">
+          <option>SaaS</option><option>Developer Tools</option><option>E-commerce</option><option>Technology</option><option>Cloud Computing</option>
+          <option>Fintech</option><option>Banking</option><option>Insurance</option><option>Healthcare</option><option>Pharmaceuticals</option>
+          <option>Education</option><option>E-learning</option><option>Hospitality</option><option>Travel</option><option>Food &amp; Beverage</option>
+          <option>Retail</option><option>Fashion</option><option>Jewellery</option><option>Manufacturing</option><option>Automotive</option>
+          <option>Real Estate</option><option>Construction</option><option>Logistics</option><option>Supply Chain</option><option>Energy</option>
+          <option>Telecom</option><option>Media &amp; Entertainment</option><option>Gaming</option><option>Publishing</option><option>Film</option>
+          <option>Artificial Intelligence</option><option>Cybersecurity</option><option>Blockchain</option><option>Robotics</option><option>IoT</option>
+          <option>Data Analytics</option><option>Business Intelligence</option><option>Marketing &amp; Advertising</option><option>Human Resources</option><option>Recruiting</option>
+          <option>Legal</option><option>Consulting</option><option>Accounting</option><option>Non-profit</option><option>Government</option>
+          <option>Agriculture</option><option>Aviation</option><option>Wellness &amp; Fitness</option><option>Sports</option><option>Biotechnology</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:600;color:#464554;text-transform:uppercase;letter-spacing:.05em;">Job title</label>
+        <select id="ag-jobtitle" style="width:100%;padding:9px 12px;border:1px solid #c7c4d7;border-radius:8px;font-size:13px;margin-top:4px;box-sizing:border-box;background:#fff;cursor:pointer;">
+          <option>Head of Growth</option><option>CMO</option><option>CEO</option><option>CTO</option><option>COO</option>
+          <option>CFO</option><option>CIO</option><option>CISO</option><option>CDO</option><option>Founder</option>
+          <option>Co-Founder</option><option>Managing Director</option><option>Chairman</option><option>Chairperson</option><option>President</option>
+          <option>VP of Marketing</option><option>VP of Sales</option><option>VP of Growth</option><option>VP of Product</option><option>VP of Engineering</option>
+          <option>Head of Marketing</option><option>Head of Sales</option><option>Head of Product</option><option>Head of Engineering</option><option>Head of Demand Generation</option>
+          <option>Head of Content</option><option>Head of Brand</option><option>Director of Growth</option><option>Director of Marketing</option><option>Director of Sales</option>
+          <option>Director of Demand Gen</option><option>Director of Product</option><option>Growth Lead</option><option>Growth Manager</option><option>Marketing Manager</option>
+          <option>Sales Manager</option><option>Demand Gen Manager</option><option>Content Marketing Manager</option><option>Product Marketing Manager</option><option>Brand Manager</option>
+          <option>Digital Marketing Manager</option><option>Social Media Manager</option><option>SEO Manager</option><option>Email Marketing Manager</option><option>Business Development Manager</option>
+          <option>Partnerships Manager</option><option>Account Executive</option><option>Account Manager</option><option>Customer Success Manager</option><option>Product Manager</option>
+          <option>Senior Product Manager</option><option>Data Analyst</option><option>Data Scientist</option><option>Business Analyst</option><option>Financial Analyst</option>
+          <option>Software Engineer</option><option>Full Stack Developer</option><option>Frontend Developer</option><option>Backend Developer</option><option>DevOps Engineer</option>
+          <option>ML Engineer</option><option>AI Engineer</option><option>QA Engineer</option><option>IT Manager</option><option>Operations Manager</option>
+          <option>Supply Chain Manager</option><option>HR Manager</option><option>Talent Acquisition Manager</option><option>Recruitment Manager</option><option>Office Manager</option>
+          <option>Branch Manager</option><option>Store Manager</option><option>General Manager</option><option>Regional Manager</option><option>Country Head</option>
+          <option>Area Sales Manager</option><option>Channel Manager</option><option>Franchise Owner</option><option>Owner</option><option>Partner</option>
+          <option>Principal</option><option>Consultant</option><option>Senior Consultant</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:600;color:#464554;text-transform:uppercase;letter-spacing:.05em;">Location</label>
+        <select id="ag-location" style="width:100%;padding:9px 12px;border:1px solid #c7c4d7;border-radius:8px;font-size:13px;margin-top:4px;box-sizing:border-box;background:#fff;cursor:pointer;">
+          <option>United States</option><option>San Francisco USA</option><option>New York USA</option><option>Remote USA</option><option>Remote</option>
+          <option>San Jose USA</option><option>Berlin Germany</option><option>India</option><option>Mumbai, India</option><option>Delhi, India</option>
+          <option>Bangalore, India</option><option>Hyderabad, India</option><option>Chennai, India</option><option>Pune, India</option><option>Kolkata, India</option>
+          <option>Ahmedabad, India</option><option>Coimbatore, India</option><option>United Kingdom</option><option>London, UK</option><option>Manchester, UK</option>
+          <option>Canada</option><option>Toronto, Canada</option><option>Vancouver, Canada</option><option>Australia</option><option>Sydney, Australia</option>
+          <option>Melbourne, Australia</option><option>New Zealand</option><option>Germany</option><option>Munich, Germany</option><option>France</option>
+          <option>Paris, France</option><option>Netherlands</option><option>Amsterdam, Netherlands</option><option>Switzerland</option><option>Sweden</option>
+          <option>Norway</option><option>Denmark</option><option>Finland</option><option>Belgium</option><option>Austria</option>
+          <option>Spain</option><option>Italy</option><option>Portugal</option><option>Ireland</option><option>Poland</option>
+          <option>Greece</option><option>Czech Republic</option><option>Hungary</option><option>Romania</option><option>Turkey</option>
+          <option>Russia</option><option>Ukraine</option><option>United Arab Emirates</option><option>Dubai, UAE</option><option>Saudi Arabia</option>
+          <option>Qatar</option><option>Kuwait</option><option>Oman</option><option>Bahrain</option><option>Israel</option>
+          <option>Egypt</option><option>Nigeria</option><option>Kenya</option><option>South Africa</option><option>Morocco</option>
+          <option>China</option><option>Japan</option><option>South Korea</option><option>Singapore</option><option>Malaysia</option>
+          <option>Indonesia</option><option>Vietnam</option><option>Thailand</option><option>Philippines</option><option>Bangladesh</option>
+          <option>Pakistan</option><option>Sri Lanka</option><option>Nepal</option><option>Brazil</option><option>Mexico</option>
+          <option>Argentina</option><option>Colombia</option><option>Chile</option><option>Peru</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:600;color:#464554;text-transform:uppercase;letter-spacing:.05em;"># Leads</label>
+        <select id="ag-limit" style="width:100%;padding:9px 12px;border:1px solid #c7c4d7;border-radius:8px;font-size:13px;margin-top:4px;box-sizing:border-box;background:#fff;cursor:pointer;">
+          <option value="3">3 leads</option><option value="5">5 leads</option><option value="8">8 leads</option>
+          <option value="10">10 leads</option><option value="15">15 leads</option><option value="20">20 leads</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Schedule controls + action buttons -->
+    <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;margin-bottom:16px;">
+      <div>
+        <label style="font-size:11px;font-weight:600;color:#464554;text-transform:uppercase;">Time</label>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:4px;">
+          <select id="ag-time-h" style="padding:9px 10px;border:1px solid #c7c4d7;border-radius:8px;font-size:13px;background:#fff;cursor:pointer;">
+            <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option>
+            <option>7</option><option>8</option><option selected>9</option><option>10</option><option>11</option><option>12</option>
+          </select>
+          <select id="ag-time-m" style="padding:9px 10px;border:1px solid #c7c4d7;border-radius:8px;font-size:13px;background:#fff;cursor:pointer;">
+            <option selected>00</option><option>05</option><option>10</option><option>15</option><option>20</option><option>25</option>
+            <option>30</option><option>35</option><option>40</option><option>45</option><option>50</option><option>55</option>
+          </select>
+          <select id="ag-time-ampm" style="padding:9px 10px;border:1px solid #c7c4d7;border-radius:8px;font-size:13px;background:#fff;cursor:pointer;font-weight:600;">
+            <option selected>AM</option><option>PM</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:600;color:#464554;text-transform:uppercase;">Repeat</label>
+        <select id="ag-repeat" style="padding:9px 12px;border:1px solid #c7c4d7;border-radius:8px;font-size:13px;margin-top:4px;background:#fff;">
+          <option value="once">Once</option>
+          <option value="daily">Daily</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:11px;font-weight:600;color:#464554;text-transform:uppercase;">…or in (min)</label>
+        <input id="ag-minutes" type="number" min="1" placeholder="e.g. 30" style="width:120px;padding:9px 12px;border:1px solid #c7c4d7;border-radius:8px;font-size:13px;margin-top:4px;">
+      </div>
+      <button class="btn-primary" id="ag-run-btn" onclick="agentRunNow()" style="display:flex;align-items:center;gap:6px;">
+        <span class="material-symbols-outlined" style="font-size:18px;">play_arrow</span> Run now
+      </button>
+      <button class="btn-ghost" onclick="agentSchedule()" style="display:flex;align-items:center;gap:6px;">
+        <span class="material-symbols-outlined" style="font-size:18px;">schedule</span> Schedule
+      </button>
+    </div>
+
+    <!-- Live output -->
+    <div id="agent-output" style="border-top:1px solid #c7c4d7;padding-top:14px;font-size:13px;">
+      <p style="color:#464554;">No run yet — click <b>Run now</b> to watch the agents work.</p>
+    </div>
+
+    <!-- Scheduled jobs (triggered by n8n) -->
+    <div id="agent-jobs" style="margin-top:14px;"></div>
+
+    <!-- Live run (Run now) — shows Running while agents work, then Done -->
+    <div id="agent-live" style="margin-top:14px;"></div>
+  </div>
+
   <!-- KPI Cards -->
   <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:20px;margin-bottom:28px;">
     <div class="card" style="padding:24px;">
@@ -216,7 +400,7 @@ canvas { display:block; }
         <span class="material-symbols-outlined" style="color:#4648d4;">groups</span>
       </div>
       <div style="font-size:36px;font-weight:700;" id="kpi-total">—</div>
-      <div style="margin-top:8px;"><span class="tag score-green">+12.5%</span> <span style="font-size:12px;color:#464554;">vs last mo</span></div>
+      <div style="margin-top:8px;"><span class="tag" id="kpi-total-tag" style="background:#f1f0f7;color:#464554;">Awaiting run</span> <span style="font-size:12px;color:#464554;" id="kpi-total-sub">click Run now</span></div>
     </div>
     <div class="card" style="padding:24px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -232,7 +416,7 @@ canvas { display:block; }
         <span class="material-symbols-outlined" style="color:#4648d4;">verified_user</span>
       </div>
       <div style="font-size:36px;font-weight:700;" id="kpi-score">—</div>
-      <div style="margin-top:8px;"><span class="tag" style="background:#ede9fe;color:#4648d4;">Optimized</span> <span style="font-size:12px;color:#464554;">Stable pipeline</span></div>
+      <div style="margin-top:8px;"><span class="tag" id="kpi-score-tag" style="background:#f1f0f7;color:#464554;">No run</span> <span style="font-size:12px;color:#464554;" id="kpi-score-sub">PII · Injection · Hallucination · Tone</span></div>
     </div>
     <div class="card" style="padding:24px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -240,14 +424,54 @@ canvas { display:block; }
         <span class="material-symbols-outlined" style="color:#4648d4;">account_tree</span>
       </div>
       <div style="font-size:36px;font-weight:700;" id="kpi-runs">—</div>
-      <div style="margin-top:8px;"><span class="tag score-green">Active</span> <span style="font-size:12px;color:#464554;">n8n connected</span></div>
+      <div style="margin-top:8px;"><span class="tag" id="kpi-runs-tag" style="background:#f1f0f7;color:#464554;">No runs</span> <span style="font-size:12px;color:#464554;" id="kpi-runs-sub">agent pipeline executions</span></div>
+    </div>
+  </div>
+
+  <!-- 📈 Run Analytics — real agent output only (populated after Run now / n8n) -->
+  <div id="analytics-section" style="margin-bottom:28px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;gap:12px;flex-wrap:wrap;">
+      <div>
+        <h2 style="font-size:18px;font-weight:600;margin:0;">📈 Run Analytics</h2>
+        <p style="font-size:12px;color:#464554;margin:4px 0 0;" id="analytics-sub">No run yet — charts fill in automatically once the agents finish.</p>
+      </div>
+      <span class="tag" id="analytics-trigger" style="background:#f1f0f7;color:#464554;">—</span>
+    </div>
+
+    <div id="analytics-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:20px;">
+      <!-- 1. Approval donut -->
+      <div class="card" style="padding:20px;">
+        <div style="font-size:11px;font-weight:600;color:#464554;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Approval Rate</div>
+        <canvas id="an-donut" style="width:100%;height:150px;"></canvas>
+        <div id="an-donut-legend" style="font-size:11px;color:#464554;text-align:center;margin-top:6px;">Awaiting run</div>
+      </div>
+
+      <!-- 2. Security score distribution -->
+      <div class="card" style="padding:20px;">
+        <div style="font-size:11px;font-weight:600;color:#464554;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Security Scores</div>
+        <canvas id="an-scores" style="width:100%;height:150px;"></canvas>
+        <div id="an-scores-legend" style="font-size:11px;color:#464554;text-align:center;margin-top:6px;">Awaiting run</div>
+      </div>
+
+      <!-- 3. Security check breakdown -->
+      <div class="card" style="padding:20px;">
+        <div style="font-size:11px;font-weight:600;color:#464554;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Safety Checks</div>
+        <canvas id="an-checks" style="width:100%;height:150px;"></canvas>
+        <div id="an-checks-legend" style="font-size:11px;color:#464554;text-align:center;margin-top:6px;">Awaiting run</div>
+      </div>
+
+      <!-- 4. Agent funnel -->
+      <div class="card" style="padding:20px;">
+        <div style="font-size:11px;font-weight:600;color:#464554;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Agent Funnel</div>
+        <div id="an-funnel" style="font-size:12px;color:#464554;text-align:center;padding-top:30px;">Awaiting run</div>
+      </div>
     </div>
   </div>
 
   <!-- Leads + Security Log -->
   <div style="display:grid;grid-template-columns:2fr 1fr;gap:20px;margin-bottom:28px;">
     <!-- Leads Table -->
-    <div class="card" style="overflow:hidden;">
+    <div class="card tbl-wrap" style="overflow:hidden;">
       <div style="padding:16px 20px;border-bottom:1px solid #c7c4d7;display:flex;justify-content:space-between;align-items:center;background:rgba(239,244,255,.4);">
         <span style="font-size:18px;font-weight:600;">Recent Leads</span>
         <div style="display:flex;gap:8px;">
@@ -291,8 +515,8 @@ canvas { display:block; }
   <div class="card" style="overflow:hidden;margin-bottom:28px;">
     <div style="padding:16px 20px;border-bottom:1px solid #c7c4d7;display:flex;justify-content:space-between;align-items:center;background:rgba(239,244,255,.4);">
       <div>
-        <div style="font-size:18px;font-weight:600;">Pipeline Activity</div>
-        <div style="font-size:12px;color:#464554;margin-top:2px;">Real-time throughput metrics (Last 24 hours)</div>
+        <div style="font-size:18px;font-weight:600;">Run History</div>
+        <div style="font-size:12px;color:#464554;margin-top:2px;" id="activity-sub">Leads processed by each real agent run — dashboard &amp; n8n triggers</div>
       </div>
       <div style="display:flex;background:#fff;border:1px solid #c7c4d7;border-radius:8px;overflow:hidden;">
         <button style="padding:6px 14px;background:#4648d4;color:#fff;border:none;font-size:12px;font-weight:600;cursor:pointer;">24h</button>
@@ -303,8 +527,8 @@ canvas { display:block; }
     <div style="padding:20px;height:260px;">
       <canvas id="activity-chart" style="width:100%;height:100%;"></canvas>
     </div>
-    <div style="padding:0 20px 12px;display:flex;justify-content:space-between;font-size:11px;color:#464554;">
-      <span>00:00</span><span>06:00</span><span>12:00</span><span>18:00</span><span>23:59</span>
+    <div id="activity-legend" style="padding:0 20px 14px;display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:#464554;">
+      <span>No runs yet</span>
     </div>
   </div>
 
@@ -317,28 +541,28 @@ canvas { display:block; }
         <div style="font-weight:700;font-size:15px;margin-top:8px;">Scout</div>
         <div style="font-size:12px;color:#4648d4;font-weight:600;margin-top:4px;">Lead Discovery</div>
         <div style="font-size:11px;color:#464554;margin-top:4px;">Mock CSV · Apollo · Hunter</div>
-        <div style="margin-top:10px;"><span class="tag score-green">● Active</span></div>
+        <div style="margin-top:10px;"><span class="tag" id="st-scout" style="background:#f1f0f7;color:#464554;">○ Idle</span></div>
       </div>
       <div class="card" style="padding:20px;text-align:center;">
         <span class="material-symbols-outlined fill-icon" style="font-size:32px;color:#4648d4;">biotech</span>
         <div style="font-weight:700;font-size:15px;margin-top:8px;">Analyst</div>
         <div style="font-size:12px;color:#4648d4;font-weight:600;margin-top:4px;">Lead Enrichment</div>
         <div style="font-size:11px;color:#464554;margin-top:4px;">OCR · Tesseract · Vision</div>
-        <div style="margin-top:10px;"><span class="tag score-green">● Active</span></div>
+        <div style="margin-top:10px;"><span class="tag" id="st-analyst" style="background:#f1f0f7;color:#464554;">○ Idle</span></div>
       </div>
       <div class="card" style="padding:20px;text-align:center;">
         <span class="material-symbols-outlined fill-icon" style="font-size:32px;color:#4648d4;">edit_note</span>
         <div style="font-weight:700;font-size:15px;margin-top:8px;">Writer</div>
         <div style="font-size:12px;color:#4648d4;font-weight:600;margin-top:4px;">Outreach Drafting</div>
         <div style="font-size:11px;color:#464554;margin-top:4px;">Personalised · &lt;150 words</div>
-        <div style="margin-top:10px;"><span class="tag score-green">● Active</span></div>
+        <div style="margin-top:10px;"><span class="tag" id="st-writer" style="background:#f1f0f7;color:#464554;">○ Idle</span></div>
       </div>
       <div class="card" style="padding:20px;text-align:center;">
         <span class="material-symbols-outlined fill-icon" style="font-size:32px;color:#4648d4;">verified_user</span>
         <div style="font-weight:700;font-size:15px;margin-top:8px;">Security Guard</div>
         <div style="font-size:12px;color:#4648d4;font-weight:600;margin-top:4px;">Compliance Check</div>
         <div style="font-size:11px;color:#464554;margin-top:4px;">PII · Injection · Hallucination</div>
-        <div style="margin-top:10px;"><span class="tag score-green">● Active</span></div>
+        <div style="margin-top:10px;"><span class="tag" id="st-guard" style="background:#f1f0f7;color:#464554;">○ Idle</span></div>
       </div>
     </div>
   </div>
@@ -369,7 +593,7 @@ canvas { display:block; }
     <input type="text" id="leads-search" placeholder="Search by name, company, or industry…" oninput="filterLeads()" style="width:100%;border:1px solid #c7c4d7;border-radius:10px;padding:10px 14px 10px 44px;font-size:14px;outline:none;transition:border-color .15s;" onfocus="this.style.borderColor='#4648d4'" onblur="this.style.borderColor='#c7c4d7'">
   </div>
 
-  <div class="card" style="overflow:hidden;">
+  <div class="card tbl-wrap" style="overflow:hidden;">
     <table style="width:100%;border-collapse:collapse;">
       <thead>
         <tr style="background:rgba(239,244,255,.6);">
@@ -438,7 +662,7 @@ canvas { display:block; }
   </div>
 
   <!-- Full log table -->
-  <div class="card" style="overflow:hidden;">
+  <div class="card tbl-wrap" style="overflow:hidden;">
     <div style="padding:16px 20px;border-bottom:1px solid #c7c4d7;font-size:18px;font-weight:600;background:rgba(239,244,255,.4);">All Security Events</div>
     <table style="width:100%;border-collapse:collapse;">
       <thead>
@@ -550,7 +774,7 @@ canvas { display:block; }
               <span class="material-symbols-outlined fill-icon" style="color:#464554;">api</span>
               <div>
                 <div style="font-size:13px;font-weight:600;">FastAPI Server</div>
-                <div style="font-size:11px;color:#464554;">localhost:8000 · Running</div>
+                <div style="font-size:11px;color:#464554;">localhost:8001 · Running</div>
               </div>
             </div>
             <span class="tag score-green">● Live</span>
@@ -559,6 +783,118 @@ canvas { display:block; }
       </div>
     </div>
 
+  </div>
+</div>
+
+<!-- ──────────────────────── PAGE: DOWNLOAD (Decision Intelligence) ─────── -->
+<div class="page" id="page-download">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;gap:12px;flex-wrap:wrap;">
+    <div>
+      <h1 style="font-size:24px;font-weight:600;margin:0;">📊 Decision Intelligence Report</h1>
+      <p style="font-size:13px;color:#464554;margin:4px 0 0;">
+        Explore every lead by industry, role, location &amp; messages — pick who to contact first.
+        <span class="tag" style="background:#dcfce7;color:#16a34a;">● Live</span>
+        updates automatically after every agent run.
+      </p>
+    </div>
+    <div style="display:flex;gap:8px;" class="no-print">
+      <button class="btn-ghost" data-refresh onclick="loadDownload(true)" style="display:flex;align-items:center;gap:6px;"><span class="material-symbols-outlined" style="font-size:18px;">refresh</span> Refresh</button>
+      <button class="btn-primary" id="dl-pdf-btn" onclick="downloadPDF()" style="display:flex;align-items:center;gap:6px;"><span class="material-symbols-outlined" style="font-size:18px;">picture_as_pdf</span> Download PDF</button>
+    </div>
+  </div>
+
+  <div id="dl-report">
+
+    <!-- Slicer bar (Power BI style filters) -->
+    <div class="card no-print" style="padding:14px 16px;margin-bottom:18px;display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+      <div>
+        <label style="font-size:10px;font-weight:700;color:#464554;text-transform:uppercase;letter-spacing:.06em;">Industry</label>
+        <select id="dl-f-industry" onchange="renderDownload()" style="display:block;min-width:140px;padding:8px 10px;border:1px solid #c7c4d7;border-radius:8px;font-size:13px;background:#fff;margin-top:3px;cursor:pointer;"><option value="">All industries</option></select>
+      </div>
+      <div>
+        <label style="font-size:10px;font-weight:700;color:#464554;text-transform:uppercase;letter-spacing:.06em;">Job title</label>
+        <select id="dl-f-title" onchange="renderDownload()" style="display:block;min-width:140px;padding:8px 10px;border:1px solid #c7c4d7;border-radius:8px;font-size:13px;background:#fff;margin-top:3px;cursor:pointer;"><option value="">All titles</option></select>
+      </div>
+      <div>
+        <label style="font-size:10px;font-weight:700;color:#464554;text-transform:uppercase;letter-spacing:.06em;">Location</label>
+        <select id="dl-f-location" onchange="renderDownload()" style="display:block;min-width:140px;padding:8px 10px;border:1px solid #c7c4d7;border-radius:8px;font-size:13px;background:#fff;margin-top:3px;cursor:pointer;"><option value="">All locations</option></select>
+      </div>
+      <div>
+        <label style="font-size:10px;font-weight:700;color:#464554;text-transform:uppercase;letter-spacing:.06em;">Interest level</label>
+        <select id="dl-f-interest" onchange="renderDownload()" style="display:block;min-width:160px;padding:8px 10px;border:1px solid #c7c4d7;border-radius:8px;font-size:13px;background:#fff;margin-top:3px;cursor:pointer;"><option value="">All levels</option></select>
+      </div>
+      <button class="btn-ghost" onclick="dlResetFilters()" style="display:flex;align-items:center;gap:5px;"><span class="material-symbols-outlined" style="font-size:16px;">filter_alt_off</span> Clear</button>
+      <span id="dl-filter-info" style="margin-left:auto;font-size:12px;color:#464554;"></span>
+    </div>
+
+    <!-- KPI strip -->
+    <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:18px;" id="dl-kpis">
+      <div class="card" style="padding:14px 16px;"><div style="font-size:10px;font-weight:700;color:#464554;text-transform:uppercase;letter-spacing:.06em;">Total leads</div><div style="font-size:26px;font-weight:700;margin-top:2px;" id="dl-kpi-total">—</div></div>
+      <div class="card" style="padding:14px 16px;"><div style="font-size:10px;font-weight:700;color:#464554;text-transform:uppercase;letter-spacing:.06em;">Approved</div><div style="font-size:26px;font-weight:700;margin-top:2px;color:#16a34a;" id="dl-kpi-approved">—</div></div>
+      <div class="card" style="padding:14px 16px;"><div style="font-size:10px;font-weight:700;color:#464554;text-transform:uppercase;letter-spacing:.06em;">Avg score</div><div style="font-size:26px;font-weight:700;margin-top:2px;" id="dl-kpi-avg">—</div></div>
+      <div class="card" style="padding:14px 16px;"><div style="font-size:10px;font-weight:700;color:#464554;text-transform:uppercase;letter-spacing:.06em;">Industries</div><div style="font-size:26px;font-weight:700;margin-top:2px;" id="dl-kpi-industries">—</div></div>
+      <div class="card" style="padding:14px 16px;"><div style="font-size:10px;font-weight:700;color:#464554;text-transform:uppercase;letter-spacing:.06em;">Top location</div><div style="font-size:18px;font-weight:700;margin-top:6px;" id="dl-kpi-location">—</div></div>
+      <div class="card" style="padding:14px 16px;"><div style="font-size:10px;font-weight:700;color:#464554;text-transform:uppercase;letter-spacing:.06em;">Top priority</div><div style="font-size:18px;font-weight:700;margin-top:6px;color:#15803d;" id="dl-kpi-priority">—</div></div>
+    </div>
+
+    <!-- Row 1: Industry donut | Job titles | Locations -->
+    <div style="display:grid;grid-template-columns:repeat(12,1fr);gap:16px;margin-bottom:16px;">
+      <div class="card" style="grid-column:span 4;padding:18px;">
+        <div style="font-size:11px;font-weight:700;color:#464554;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">Leads by Industry</div>
+        <canvas id="dl-donut" style="width:100%;height:170px;"></canvas>
+        <div id="dl-donut-legend" style="display:flex;flex-wrap:wrap;gap:6px 12px;font-size:11px;color:#464554;margin-top:10px;"></div>
+      </div>
+      <div class="card" style="grid-column:span 4;padding:18px;">
+        <div style="font-size:11px;font-weight:700;color:#464554;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">Leads by Job Title</div>
+        <canvas id="dl-titles" style="width:100%;height:220px;"></canvas>
+      </div>
+      <div class="card" style="grid-column:span 4;padding:18px;">
+        <div style="font-size:11px;font-weight:700;color:#464554;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">Leads by Location</div>
+        <canvas id="dl-locations" style="width:100%;height:220px;"></canvas>
+      </div>
+    </div>
+
+    <!-- Row 2: Interest levels | Score distribution -->
+    <div style="display:grid;grid-template-columns:repeat(12,1fr);gap:16px;margin-bottom:16px;">
+      <div class="card" style="grid-column:span 7;padding:18px;">
+        <div style="font-size:11px;font-weight:700;color:#464554;text-transform:uppercase;letter-spacing:.06em;margin-bottom:2px;">Decision Interest Levels</div>
+        <div style="font-size:11px;color:#464554;margin-bottom:10px;">Each lead ranked by outreach priority — contact the top tier first</div>
+        <canvas id="dl-interest" style="width:100%;height:180px;"></canvas>
+        <div id="dl-interest-legend" style="display:flex;flex-wrap:wrap;gap:6px 14px;font-size:11px;color:#464554;margin-top:10px;"></div>
+      </div>
+      <div class="card" style="grid-column:span 5;padding:18px;">
+        <div style="font-size:11px;font-weight:700;color:#464554;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">Security Score Spread</div>
+        <canvas id="dl-scores" style="width:100%;height:210px;"></canvas>
+      </div>
+    </div>
+
+    <!-- Row 3: Company leaderboard | Trend -->
+    <div style="display:grid;grid-template-columns:repeat(12,1fr);gap:16px;margin-bottom:16px;">
+      <div class="card" style="grid-column:span 5;padding:18px;overflow:hidden;">
+        <div style="font-size:11px;font-weight:700;color:#464554;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">Company Leaderboard</div>
+        <div id="dl-companies" style="font-size:12px;color:#464554;">—</div>
+      </div>
+      <div class="card" style="grid-column:span 7;padding:18px;">
+        <div style="font-size:11px;font-weight:700;color:#464554;text-transform:uppercase;letter-spacing:.06em;margin-bottom:10px;">Leads Discovered Over Time</div>
+        <canvas id="dl-trend" style="width:100%;height:210px;"></canvas>
+      </div>
+    </div>
+
+    <!-- Row 4: Messages -->
+    <div class="card" style="padding:18px;margin-bottom:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;flex-wrap:wrap;">
+        <div>
+          <div style="font-size:11px;font-weight:700;color:#464554;text-transform:uppercase;letter-spacing:.06em;">Outreach Messages</div>
+          <div style="font-size:11px;color:#464554;margin-top:2px;">Drafted by the Writer agent, scored by Guard</div>
+        </div>
+        <span class="tag" id="dl-msg-count" style="background:#f1f0f7;color:#464554;">—</span>
+      </div>
+      <div id="dl-messages" style="max-height:420px;overflow-y:auto;display:flex;flex-direction:column;gap:10px;">—</div>
+    </div>
+
+    <div style="font-size:11px;color:#464554;text-align:center;padding:4px 0 8px;">
+      AgentFlow Decision Intelligence · generated from real agent runs · <span id="dl-generated"></span>
+    </div>
   </div>
 </div>
 
@@ -617,7 +953,15 @@ canvas { display:block; }
 
 <!-- ═══════════════════════════ JAVASCRIPT ════════════════════════════════ -->
 <script>
-const API = 'http://localhost:8000';
+// API base — CLOUD-READY.
+// When FastAPI serves this page (locally OR on Render), the API is on the SAME
+// origin, so we use window.location.origin. That's why the dashboard works
+// identically at http://localhost:8001/dashboard and at
+// https://agentflow.onrender.com/dashboard with zero edits.
+// Only if someone opens the raw HTML file (file://) do we fall back to localhost.
+const API = (location.protocol === 'http:' || location.protocol === 'https:')
+  ? location.origin
+  : 'http://localhost:8001';
 let allLeads = [], allRuns = [];
 
 // ── Navigation ────────────────────────────────────────────────────────────────
@@ -629,6 +973,20 @@ function navigate(page) {
   if (nl) nl.classList.add('active');
   window.scrollTo(0,0);
   closeDropdowns();
+  closeSidebar();                       // mobile: close the drawer after tapping
+  if (page === 'download') initDownloadPage();
+}
+
+// ── Mobile sidebar drawer ────────────────────────────────────────────────────
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  const ov = document.getElementById('sidebar-overlay');
+  const open = sb.classList.toggle('open');
+  ov.classList.toggle('show', open);
+}
+function closeSidebar() {
+  document.getElementById('sidebar').classList.remove('open');
+  document.getElementById('sidebar-overlay').classList.remove('show');
 }
 
 // ── Dropdowns ─────────────────────────────────────────────────────────────────
@@ -666,48 +1024,63 @@ function passIcon(pass) {
   return `<span class="material-symbols-outlined fill-icon" style="font-size:18px;color:${pass?'#16a34a':'#dc2626'}">${pass?'check_circle':'cancel'}</span>`;
 }
 
-// ── Mock Data ─────────────────────────────────────────────────────────────────
-function mockLeads() {
-  return [
-    {id:1,full_name:"Sarah Chen",  job_title:"Head of Growth",  company:"Notion",   industry:"SaaS",     security_score:98,status:"approved", subject_line:"Quick thought on Notion's growth loop",   security_log:{breakdown:{pii:{score:40},injection:{score:30},hallucination:{score:18},tone:{score:10}}}},
-    {id:2,full_name:"Marcus Webb", job_title:"VP Marketing",    company:"Linear",   industry:"SaaS",     security_score:91,status:"approved", subject_line:"Linear's velocity caught my eye",          security_log:{breakdown:{pii:{score:40},injection:{score:30},hallucination:{score:11},tone:{score:10}}}},
-    {id:3,full_name:"Priya Nair",  job_title:"Demand Gen Dir",  company:"Vercel",   industry:"Dev Tools",security_score:76,status:"approved", subject_line:"Vercel's edge network — a question",       security_log:{breakdown:{pii:{score:40},injection:{score:30},hallucination:{score:6}, tone:{score:0}}}},
-    {id:4,full_name:"James Okafor",job_title:"CMO",             company:"Retool",   industry:"SaaS",     security_score:42,status:"rejected", subject_line:"",                                          security_log:{breakdown:{pii:{score:0}, injection:{score:30},hallucination:{score:12},tone:{score:0}}}},
-    {id:5,full_name:"Amelia Torres",job_title:"Head of Growth", company:"Supabase", industry:"Dev Tools",security_score:88,status:"approved", subject_line:"Supabase's open-source momentum",          security_log:{breakdown:{pii:{score:40},injection:{score:30},hallucination:{score:8}, tone:{score:10}}}},
-  ];
+// ── Data Fetching — REAL data only (no mock/demo fallbacks) ───────────────────
+async function fetchLastRun() {
+  try { const r = await fetch(`${API}/last-run`, { signal: AbortSignal.timeout(4000) }); const d = await r.json(); return d.run || null; }
+  catch { return null; }
 }
-function mockRuns() {
-  const now = Date.now();
-  return Array.from({length:24},(_,i)=>({id:i+1,status:'completed',leads_processed:Math.floor(Math.random()*8)+2,trigger_source:'n8n_webhook',started_at:new Date(now-(23-i)*3600000).toISOString()}));
+async function fetchLeads() {           // real DB rows (Leads / Security pages)
+  try { const r = await fetch(`${API}/leads?limit=50`, { signal: AbortSignal.timeout(4000) }); const d = await r.json(); return d.leads || []; }
+  catch { return []; }
 }
-
-// ── Data Fetching ─────────────────────────────────────────────────────────────
-async function fetchLeads() {
-  try { const r=await fetch(`${API}/leads?limit=50`,{signal:AbortSignal.timeout(4000)}); const d=await r.json(); return d.leads||[]; }
-  catch { return mockLeads(); }
-}
-async function fetchRuns() {
-  try { const r=await fetch(`${API}/runs?limit=48`,{signal:AbortSignal.timeout(4000)}); const d=await r.json(); return d.runs||[]; }
-  catch { return mockRuns(); }
+async function fetchRuns() {            // real pipeline run history
+  try { const r = await fetch(`${API}/runs?limit=48`, { signal: AbortSignal.timeout(4000) }); const d = await r.json(); return d.runs || []; }
+  catch { return []; }
 }
 
-// ── Render KPIs ───────────────────────────────────────────────────────────────
-function renderKPIs(leads, runs) {
-  const approved = leads.filter(l=>l.status==='approved');
-  const scores   = leads.filter(l=>l.security_score).map(l=>l.security_score);
-  const avg      = scores.length ? Math.round(scores.reduce((a,b)=>a+b,0)/scores.length) : 0;
-  const pct      = leads.length ? Math.round(approved.length/leads.length*100) : 0;
-  document.getElementById('kpi-total').textContent    = leads.length;
-  document.getElementById('kpi-approved').textContent = approved.length;
-  document.getElementById('kpi-score').textContent    = avg+'%';
-  document.getElementById('kpi-runs').textContent     = runs.length;
-  document.getElementById('kpi-compliance').textContent = pct+'%';
+// ── Render KPIs (driven by the last agent / n8n run) ──────────────────────────
+function renderKPIs(leads, runs, run) {
+  const el = id => document.getElementById(id);
+  const set = (id, v) => { const e = el(id); if (e) e.textContent = v; };
+  const tag = (id, txt, bg, fg) => { const e = el(id); if (e) { e.textContent = txt; e.style.background = bg; e.style.color = fg; } };
+
+  // real run history (never fake)
+  set('kpi-runs', runs.length ? runs.length : '—');
+  tag('kpi-runs-tag', runs.length ? 'Real executions' : 'No runs',
+      runs.length ? '#e0f2fe' : '#f1f0f7', runs.length ? '#0369a1' : '#464554');
+  set('kpi-runs-sub', runs.length ? 'dashboard + n8n triggered' : 'click Run now');
+
+  if (!leads.length) {                       // nothing has run yet
+    set('kpi-total', '—'); set('kpi-approved', '—'); set('kpi-score', '—'); set('kpi-compliance', '—%');
+    tag('kpi-total-tag', 'Awaiting run', '#f1f0f7', '#464554');
+    set('kpi-total-sub', 'click Run now');
+    tag('kpi-score-tag', 'No run', '#f1f0f7', '#464554');
+    set('kpi-score-sub', 'PII · Injection · Hallucination · Tone');
+    return;
+  }
+
+  const approved = leads.filter(l => l.status === 'approved');
+  const scores   = leads.filter(l => l.security_score != null).map(l => l.security_score);
+  const avg      = scores.length ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length) : 0;
+  const pct      = Math.round(approved.length / leads.length * 100);
+
+  set('kpi-total',     leads.length);
+  set('kpi-approved',  approved.length);
+  set('kpi-score',     avg + '%');
+  set('kpi-compliance', pct + '%');
+
+  tag('kpi-total-tag', leads.length + ' leads found', '#dcfce7', '#16a34a');
+  set('kpi-total-sub', (run && run.params) ? `${run.params.industry} · ${run.params.location}` : 'from last run');
+  tag('kpi-score-tag', avg >= 90 ? 'Secure' : avg >= 70 ? 'Review' : 'At risk',
+      avg >= 90 ? '#dcfce7' : avg >= 70 ? '#fef3c7' : '#fee2e2',
+      avg >= 90 ? '#16a34a' : avg >= 70 ? '#d97706' : '#dc2626');
+  set('kpi-score-sub', avg + '% of possible safety points');
 }
 
 // ── Render Dashboard Leads ────────────────────────────────────────────────────
 function renderDashLeads(leads) {
   const tb = document.getElementById('dash-leads-tbody');
-  if (!leads.length) { tb.innerHTML=`<tr><td colspan="4" style="padding:32px;text-align:center;color:#464554;">No leads yet — run <code>python crew.py</code></td></tr>`; return; }
+  if (!leads.length) { tb.innerHTML=`<tr><td colspan="4" style="padding:32px;text-align:center;color:#464554;"><span class="material-symbols-outlined" style="vertical-align:middle;color:#a5b4fc;">hourglass_empty</span><br>No leads yet — click <b>Run now</b> above and the agents will fill this table.</td></tr>`; return; }
   tb.innerHTML = leads.slice(0,6).map(l=>{
     const sc=l.security_score||0, cls=scoreClass(sc);
     return `<tr style="border-bottom:1px solid #eef0f8;transition:background .1s;" onmouseover="this.style.background='#f8f9ff'" onmouseout="this.style.background='#fff'">
@@ -738,7 +1111,7 @@ function renderDashLeads(leads) {
 // ── Render Security Log Feed ──────────────────────────────────────────────────
 function renderSecurityFeed(leads) {
   const el = document.getElementById('dash-security-log');
-  if (!leads.length) { el.innerHTML='<div style="text-align:center;color:#464554;padding:32px;">No data yet.</div>'; return; }
+  if (!leads.length) { el.innerHTML='<div style="text-align:center;color:#464554;padding:32px;"><span class="material-symbols-outlined" style="font-size:28px;color:#a5b4fc;">policy</span><br>No security checks yet — they run after each agent pipeline.</div>'; return; }
   el.innerHTML = leads.slice(0,6).map(l=>{
     let log=l.security_log||{}; if(typeof log==='string'){try{log=JSON.parse(log)}catch{log={}}}
     const bd=log.breakdown||{};
@@ -872,48 +1245,727 @@ function renderSecurityPage(leads) {
   }).join('');
 }
 
-// ── Chart ─────────────────────────────────────────────────────────────────────
+// ── Canvas helper (real data only) ────────────────────────────────────────────
+function ctx2d(id) {
+  const c = document.getElementById(id);
+  if (!c) return null;
+  // Always measure the PARENT card — the canvas's own style.width gets pinned
+  // after the first draw, which would freeze it at a stale (pre-layout) size.
+  const p = c.parentElement;
+  const W = (p && p.offsetWidth ? p.offsetWidth - 40 : 0) || c.clientWidth || 200;
+  const H = c.clientHeight || 150;
+  if (!W || !H) return null;
+  c.width = W * devicePixelRatio; c.height = H * devicePixelRatio;
+  c.style.width = W + 'px'; c.style.height = H + 'px';
+  const ctx = c.getContext('2d');
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  ctx.textBaseline = 'alphabetic';
+  return { ctx, W, H };
+}
+function awaitingCanvas(id, msg) {
+  const s = ctx2d(id); if (!s) return;
+  s.ctx.fillStyle = '#a5a4b3'; s.ctx.font = '12px Inter';
+  s.ctx.textAlign = 'center';
+  s.ctx.fillText(msg || 'Awaiting run', s.W / 2, s.H / 2);
+}
+
+// ── Run History Chart — bars = leads processed per real run ───────────────────
 function renderChart(runs) {
   const canvas = document.getElementById('activity-chart');
   if (!canvas) return;
   const W = canvas.parentElement.offsetWidth, H = canvas.parentElement.offsetHeight - 10;
-  canvas.width  = W * devicePixelRatio;
-  canvas.height = H * devicePixelRatio;
-  canvas.style.width = W+'px'; canvas.style.height = H+'px';
+  canvas.width = W * devicePixelRatio; canvas.height = H * devicePixelRatio;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
   const ctx = canvas.getContext('2d');
-  ctx.scale(devicePixelRatio, devicePixelRatio);
+  ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  ctx.clearRect(0, 0, W, H);
 
-  const counts = Array(24).fill(0);
-  runs.forEach(r=>{ try{ counts[new Date(r.started_at).getHours()]++; }catch{} });
-  const demo=[2,1,3,1,4,6,8,10,12,9,11,14,10,8,12,15,18,14,11,9,12,10,7,5];
-  const data = counts.every(v=>v===0) ? demo : counts;
-  const maxV = Math.max(...data)||1;
+  const recent = (runs || []).slice(-12);
+  if (!recent.length) {
+    ctx.fillStyle = '#a5a4b3'; ctx.font = '13px Inter'; ctx.textAlign = 'center';
+    ctx.fillText('No runs yet — click ▶ Run now to create your first run', W / 2, H / 2);
+    renderActivityLegend(runs || []);
+    return;
+  }
 
-  const pL=44,pR=20,pT=16,pB=8;
-  const cw=W-pL-pR, ch=H-pT-pB;
-  const barW=cw/24*.6, gap=cw/24;
+  const data   = recent.map(r => Number(r.leads_processed) || 0);
+  const maxV   = Math.max(...data, 1);
+  const pL = 44, pR = 20, pT = 18, pB = 26;
+  const cw = W - pL - pR, ch = H - pT - pB;
+  const gap = cw / data.length, barW = Math.min(46, gap * 0.6);
 
-  // Grid
-  ctx.strokeStyle='#eef0f8'; ctx.lineWidth=1;
-  [.25,.5,.75,1].forEach(f=>{
-    const y=pT+ch*(1-f);
-    ctx.beginPath(); ctx.moveTo(pL,y); ctx.lineTo(W-pR,y); ctx.stroke();
-    ctx.fillStyle='#767586'; ctx.font='10px Inter'; ctx.textAlign='right';
-    ctx.fillText(Math.round(maxV*f), pL-6, y+4);
+  ctx.strokeStyle = '#eef0f8'; ctx.lineWidth = 1;
+  [.25, .5, .75, 1].forEach(f => {
+    const y = pT + ch * (1 - f);
+    ctx.beginPath(); ctx.moveTo(pL, y); ctx.lineTo(W - pR, y); ctx.stroke();
+    ctx.fillStyle = '#767586'; ctx.font = '10px Inter'; ctx.textAlign = 'right';
+    ctx.fillText(Math.round(maxV * f), pL - 6, y + 4);
   });
 
-  // Bars
-  data.forEach((v,i)=>{
-    const x=pL+i*gap+(gap-barW)/2;
-    const h=v===0?0:Math.max(3,(v/maxV)*ch);
-    const y=pT+ch-h;
-    ctx.fillStyle = v===maxV?'#4648d4':'#a5b4fc';
+  recent.forEach((r, i) => {
+    const v = data[i];
+    const x = pL + i * gap + (gap - barW) / 2;
+    const h = Math.max(4, (v / maxV) * ch);
+    const y = pT + ch - h;
+    const isN8n = String(r.trigger_source || '').includes('n8n');
+    ctx.fillStyle = isN8n ? '#4648d4' : '#34d399';
     ctx.beginPath();
-    if(ctx.roundRect) ctx.roundRect(x,y,barW,h,[3,3,0,0]);
-    else ctx.rect(x,y,barW,h);
+    if (ctx.roundRect) ctx.roundRect(x, y, barW, h, [3, 3, 0, 0]); else ctx.rect(x, y, barW, h);
     ctx.fill();
+
+    ctx.fillStyle = '#1f1e2e'; ctx.font = '600 10px Inter'; ctx.textAlign = 'center';
+    ctx.fillText(String(v), x + barW / 2, y - 5);
+    ctx.fillStyle = '#767586'; ctx.font = '10px Inter';
+    ctx.fillText('#' + (r.id ?? (i + 1)), x + barW / 2, H - 8);
+  });
+
+  renderActivityLegend(runs || []);
+}
+
+// ── Trigger-source legend under the run chart ─────────────────────────────────
+function renderActivityLegend(runs) {
+  const el = document.getElementById('activity-legend');
+  if (!el) return;
+  if (!runs.length) { el.innerHTML = '<span>No runs yet</span>'; return; }
+  const by = {};
+  runs.forEach(r => { const k = r.trigger_source || 'unknown'; by[k] = (by[k] || 0) + 1; });
+  const colors = { dashboard: '#34d399', n8n_webhook: '#4648d4', n8n_schedule: '#f59e0b' };
+  const total = runs.length;
+  el.innerHTML = Object.entries(by).map(([k, n]) => {
+    const c = colors[k] || '#94a3b8';
+    return `<span style="display:flex;align-items:center;gap:6px;">
+      <span style="width:10px;height:10px;border-radius:3px;background:${c};display:inline-block;"></span>
+      ${esc(k)} — ${n} run${n > 1 ? 's' : ''}</span>`;
+  }).join('') + `<span style="margin-left:auto;font-weight:600;">${total} total run${total > 1 ? 's' : ''}</span>`;
+}
+
+// ═══ 1. Approval donut ═══════════════════════════════════════════════════════
+function drawDonut(pct, approvedN, rejectedN) {
+  const s = ctx2d('an-donut'); if (!s) return;
+  const { ctx, W, H } = s;
+  const cx = W / 2, cy = H / 2, r = Math.max(20, Math.min(W, H) / 2 - 10), lw = 14;
+  ctx.lineWidth = lw; ctx.lineCap = 'butt';
+  ctx.strokeStyle = '#eef0f8';
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  const start = -Math.PI / 2;
+  if (approvedN > 0) {
+    ctx.strokeStyle = '#16a34a';
+    ctx.beginPath(); ctx.arc(cx, cy, r, start, start + Math.PI * 2 * (pct / 100)); ctx.stroke();
+  }
+  if (rejectedN > 0) {
+    ctx.strokeStyle = '#dc2626';
+    ctx.beginPath(); ctx.arc(cx, cy, r, start + Math.PI * 2 * (pct / 100), start + Math.PI * 2); ctx.stroke();
+  }
+  // centre label — sized to stay inside the ring's inner radius
+  ctx.textBaseline = 'middle'; ctx.textAlign = 'center';
+  ctx.fillStyle = '#1f1e2e'; ctx.font = '700 17px Inter';
+  ctx.fillText(pct + '%', cx, cy + 1);
+  ctx.textBaseline = 'alphabetic';
+}
+
+// ═══ 2. Security score distribution ═══════════════════════════════════════════
+function drawScores(leads) {
+  const s = ctx2d('an-scores'); if (!s) return;
+  const { ctx, W, H } = s;
+  const buckets = [
+    { label: '90–100', test: v => v >= 90, color: '#16a34a' },
+    { label: '80–89',  test: v => v >= 80 && v < 90, color: '#65a30d' },
+    { label: '60–79',  test: v => v >= 60 && v < 80, color: '#d97706' },
+    { label: '0–59',   test: v => v < 60, color: '#dc2626' },
+  ];
+  const scores = leads.map(l => Number(l.security_score) || 0);
+  const counts = buckets.map(b => scores.filter(b.test).length);
+  const max = Math.max(...counts, 1);
+  const rowH = H / buckets.length, labelH = 13, barH = 9;
+
+  buckets.forEach((b, i) => {
+    const baseY = i * rowH;
+    // label (left) + count (right)
+    ctx.textBaseline = 'alphabetic'; ctx.font = '600 10px Inter';
+    ctx.textAlign = 'left'; ctx.fillStyle = '#464554';
+    ctx.fillText(b.label, 1, baseY + 11);
+    ctx.textAlign = 'right'; ctx.font = '700 10px Inter';
+    ctx.fillStyle = counts[i] ? '#1f1e2e' : '#a5a4b3';
+    ctx.fillText(String(counts[i]), W - 1, baseY + 11);
+
+    // full-width track + value bar
+    const y = baseY + labelH;
+    ctx.fillStyle = '#f1f0f7';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(0, y, W, barH, [0, 5, 5, 0]); else ctx.rect(0, y, W, barH);
+    ctx.fill();
+    const w = counts[i] === 0 ? 0 : Math.max(5, (counts[i] / max) * W);
+    if (w > 0) {
+      ctx.fillStyle = b.color;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(0, y, w, barH, [0, 5, 5, 0]); else ctx.rect(0, y, w, barH);
+      ctx.fill();
+    }
   });
 }
+
+// ═══ 3. Safety checks earned vs possible ══════════════════════════════════════
+function drawChecks(leads) {
+  const s = ctx2d('an-checks'); if (!s) return;
+  const { ctx, W, H } = s;
+  const defs = [
+    { key: 'pii',          label: 'PII',          max: 40, color: '#4648d4' },
+    { key: 'injection',    label: 'Injection',    max: 30, color: '#8b5cf6' },
+    { key: 'hallucination',label: 'Hallucination',max: 20, color: '#0ea5e9' },
+    { key: 'tone',         label: 'Tone',         max: 10, color: '#10b981' },
+  ];
+  const parse = l => { let x = l.security_log || {}; if (typeof x === 'string') { try { x = JSON.parse(x); } catch { x = {}; } } return x.breakdown || {}; };
+  const rowH = H / defs.length, labelH = 13, barH = 9;
+  let earnedAll = 0, possibleAll = 0;
+
+  defs.forEach((d, i) => {
+    let earned = 0;
+    leads.forEach(l => { const bd = parse(l); earned += Number(bd[d.key]?.score) || 0; });
+    const possible = d.max * leads.length;
+    const pct = possible ? earned / possible : 0;
+    earnedAll += earned; possibleAll += possible;
+
+    const baseY = i * rowH;
+    // label (left) + percentage (right) on their own line — no overlap.
+    // Truncate the label if the card is too narrow for both.
+    const pctTxt = Math.round(pct * 100) + '%';
+    ctx.textBaseline = 'alphabetic'; ctx.font = '600 10px Inter';
+    const pctW = ctx.measureText(pctTxt).width;
+    let label = d.label;
+    while (label.length > 3 && ctx.measureText(label).width > W - pctW - 10) label = label.slice(0, -1);
+    ctx.textAlign = 'left'; ctx.fillStyle = '#464554';
+    ctx.fillText(label, 1, baseY + 11);
+    ctx.textAlign = 'right'; ctx.font = '700 10px Inter'; ctx.fillStyle = '#1f1e2e';
+    ctx.fillText(pctTxt, W - 1, baseY + 11);
+
+    // full-width track + earned bar
+    const y = baseY + labelH;
+    ctx.fillStyle = '#f1f0f7';
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(0, y, W, barH, [0, 5, 5, 0]); else ctx.rect(0, y, W, barH);
+    ctx.fill();
+    const w = pct > 0 ? Math.max(5, pct * W) : 0;
+    if (w > 0) {
+      ctx.fillStyle = d.color;
+      ctx.beginPath();
+      if (ctx.roundRect) ctx.roundRect(0, y, w, barH, [0, 5, 5, 0]); else ctx.rect(0, y, w, barH);
+      ctx.fill();
+    }
+  });
+
+  const legend = document.getElementById('an-checks-legend');
+  if (legend) legend.textContent = possibleAll
+    ? `${earnedAll} of ${possibleAll} safety points earned`
+    : 'Awaiting run';
+  return { earnedAll, possibleAll };
+}
+
+// ═══ 4. Agent funnel ══════════════════════════════════════════════════════════
+function renderFunnel(leads) {
+  const el = document.getElementById('an-funnel');
+  if (!el) return;
+  if (!leads.length) { el.innerHTML = '<div style="color:#a5a4b3;padding-top:30px;">Awaiting run</div>'; return; }
+  const n = leads.length;
+  const enriched = leads.filter(l => l.analyst_notes).length;
+  const written  = leads.filter(l => l.message || l.subject_line).length;
+  const approved = leads.filter(l => l.status === 'approved').length;
+  const steps = [
+    ['Scout',   n,        '#4648d4'],
+    ['Analyst', enriched, '#8b5cf6'],
+    ['Writer',  written,  '#0ea5e9'],
+    ['Guard ✓', approved, '#16a34a'],
+  ];
+  const max = Math.max(...steps.map(s => s[1]), 1);
+  el.innerHTML = steps.map(([label, count, color], i) => {
+    const w = Math.max(8, (count / max) * 100);
+    const conv = i > 0 && steps[i - 1][1] ? Math.round((count / steps[i - 1][1]) * 100) + '%' : '';
+    return `<div style="margin-bottom:8px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#464554;margin-bottom:3px;gap:4px;">
+        <span style="font-weight:600;white-space:nowrap;">${label}</span>
+        <span style="font-weight:700;color:#1f1e2e;white-space:nowrap;">${count}${conv ? ' · ' + conv : ''}</span>
+      </div>
+      <div style="background:#f1f0f7;border-radius:6px;height:13px;overflow:hidden;">
+        <div style="height:13px;width:${w}%;background:${color};border-radius:6px;transition:width .4s;"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ═══ Analytics orchestrator ═══════════════════════════════════════════════════
+function renderAnalytics(run, hasRun) {
+  const sub  = document.getElementById('analytics-sub');
+  const trig = document.getElementById('analytics-trigger');
+  const setL = (id, t) => { const e = document.getElementById(id); if (e) e.textContent = t; };
+
+  if (!hasRun) {
+    if (sub) sub.textContent = 'No run yet — charts fill in automatically once the agents finish.';
+    if (trig) { trig.textContent = '—'; trig.style.background = '#f1f0f7'; trig.style.color = '#464554'; }
+    awaitingCanvas('an-donut');    setL('an-donut-legend', 'Awaiting run');
+    awaitingCanvas('an-scores');   setL('an-scores-legend', 'Awaiting run');
+    awaitingCanvas('an-checks');   setL('an-checks-legend', 'Awaiting run');
+    renderFunnel([]);
+    setAgentStates(run && run.status === 'running' ? 'running' : (run && run.status === 'failed' ? 'failed' : 'idle'));
+    return;
+  }
+
+  const leads = run.leads || [];
+  const s = run.summary || {};
+  const approved = s.approved ?? leads.filter(l => l.status === 'approved').length;
+  const rejected = s.rejected ?? (leads.length - approved);
+  const pct = leads.length ? Math.round((approved / leads.length) * 100) : 0;
+  const avg = s.avg_security_score ?? 0;
+
+  if (sub) sub.textContent = `${leads.length} leads · ${approved} approved · avg ${avg}/100 — from your ${run.trigger === 'n8n_schedule' ? 'n8n scheduled' : (run.trigger || 'agent')} run`;
+  if (trig) {
+    const t = (run.trigger || 'unknown').replace(/_/g, ' ');
+    trig.textContent = t;
+    const n8n = String(run.trigger || '').includes('n8n');
+    trig.style.background = n8n ? '#ede9fe' : '#dcfce7';
+    trig.style.color = n8n ? '#4648d4' : '#16a34a';
+  }
+
+  drawDonut(pct, approved, rejected);
+  setL('an-donut-legend', `${approved} approved · ${rejected} rejected`);
+
+  drawScores(leads);
+  const sc = leads.map(l => Number(l.security_score) || 0);
+  setL('an-scores-legend', sc.length ? `avg ${Math.round(sc.reduce((a, b) => a + b, 0) / sc.length)}/100 across ${sc.length} leads` : 'Awaiting run');
+
+  drawChecks(leads);
+  renderFunnel(leads);
+  setAgentStates('done');
+}
+
+// ── Agent status cards (real state, not a permanent "Active") ─────────────────
+function setAgentStates(mode) {
+  const ids = ['st-scout', 'st-analyst', 'st-writer', 'st-guard'];
+  const styles = {
+    idle:    ['○ Idle',    '#f1f0f7', '#464554'],
+    running: ['● Running', '#ede9fe', '#4648d4'],
+    done:    ['✓ Complete','#dcfce7', '#16a34a'],
+    failed:  ['✗ Failed',  '#fee2e2', '#dc2626'],
+  };
+  const [txt, bg, fg] = styles[mode] || styles.idle;
+  ids.forEach(id => {
+    const e = document.getElementById(id);
+    if (e) { e.textContent = txt; e.style.background = bg; e.style.color = fg; }
+  });
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  DOWNLOAD PAGE — Decision Intelligence (Power BI style, real data only)
+// ═════════════════════════════════════════════════════════════════════════════
+let dlLeads = null;
+
+const DL_LEVELS = [
+  { key: 'Highly interested', color: '#15803d', bg: '#dcfce7' },
+  { key: 'Recommended',       color: '#4648d4', bg: '#e0e1ff' },
+  { key: 'Medium',            color: '#d97706', bg: '#fef3c7' },
+  { key: 'Low',               color: '#ea580c', bg: '#ffedd5' },
+  { key: 'No interest',       color: '#64748b', bg: '#f1f0f7' },
+];
+
+// Decision rule: Guard's security score + approval status → outreach priority
+function interestOf(l) {
+  if (l.status === 'rejected') return 'No interest';
+  const s = Number(l.security_score) || 0;
+  if (s >= 95) return 'Highly interested';
+  if (s >= 85) return 'Recommended';
+  if (s >= 70) return 'Medium';
+  return 'Low';
+}
+
+async function initDownloadPage() { await loadDownload(true); }   // always fresh on open
+
+// Called when a pipeline finishes → the report must reflect the NEW run
+function dlInvalidate() {
+  dlLeads = null;
+  const page = document.getElementById('page-download');
+  if (page && page.classList.contains('active')) loadDownload(true);   // live update if user is looking at it
+}
+
+async function loadDownload(force) {
+  if (dlLeads && !force) { renderDownload(); return; }
+  const info = document.getElementById('dl-filter-info');
+  if (info) info.textContent = 'Syncing with the latest agent run…';
+  try {
+    const r = await fetch(`${API}/leads?limit=500`, { signal: AbortSignal.timeout(8000) });
+    const d = await r.json();
+    dlLeads = d.leads || [];
+  } catch { dlLeads = dlLeads || []; }
+  dlPopulateFilters();
+  renderDownload();
+}
+
+function dlPopulateFilters() {
+  const fill = (id, values, label) => {
+    const sel = document.getElementById(id);
+    if (!sel) return;
+    const cur = sel.value;
+    sel.innerHTML = `<option value="">${label}</option>` +
+      values.map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+    if (values.includes(cur)) sel.value = cur;
+  };
+  const uniq = k => [...new Set((dlLeads || []).map(l => l[k]).filter(Boolean))].sort();
+  fill('dl-f-industry', uniq('industry'), 'All industries');
+  fill('dl-f-title',    uniq('job_title'), 'All titles');
+  fill('dl-f-location', uniq('location'),  'All locations');
+  fill('dl-f-interest', DL_LEVELS.map(d => d.key), 'All levels');
+}
+
+function dlResetFilters() {
+  ['dl-f-industry', 'dl-f-title', 'dl-f-location', 'dl-f-interest'].forEach(id => {
+    const e = document.getElementById(id); if (e) e.value = '';
+  });
+  renderDownload();
+}
+
+function dlFiltered() {
+  const gi = id => (document.getElementById(id) || {}).value || '';
+  const ind = gi('dl-f-industry'), tit = gi('dl-f-title'), loc = gi('dl-f-location'), lvl = gi('dl-f-interest');
+  return (dlLeads || []).filter(l =>
+    (!ind || l.industry === ind) && (!tit || l.job_title === tit) &&
+    (!loc || l.location === loc) && (!lvl || interestOf(l) === lvl));
+}
+
+function renderDownload() {
+  if (!document.getElementById('page-download')) return;
+  const leads = dlFiltered();
+  const totalAll = (dlLeads || []).length;
+  const info = document.getElementById('dl-filter-info');
+  if (info) info.textContent = totalAll
+    ? `Showing ${leads.length} of ${totalAll} real leads`
+    : 'No leads yet — run the agents from the Dashboard first';
+  const gen = document.getElementById('dl-generated');
+  if (gen) gen.textContent = 'generated ' + new Date().toLocaleString();
+
+  if (!leads.length) {
+    ['dl-donut', 'dl-titles', 'dl-locations', 'dl-interest', 'dl-scores', 'dl-trend'].forEach(id => {
+      const s = ctx2d(id); if (s) {
+        s.ctx.fillStyle = '#a5a4b3'; s.ctx.font = '12px Inter'; s.ctx.textAlign = 'center';
+        s.ctx.fillText(totalAll ? 'No leads match these filters' : 'Awaiting first agent run', s.W / 2, s.H / 2);
+      }
+    });
+    const lg = document.getElementById('dl-donut-legend'); if (lg) lg.innerHTML = '';
+    const il = document.getElementById('dl-interest-legend'); if (il) il.innerHTML = '';
+    const co = document.getElementById('dl-companies'); if (co) co.textContent = '—';
+    const ms = document.getElementById('dl-messages'); if (ms) ms.innerHTML = '<div style="color:#a5a4b3;padding:20px;text-align:center;">No messages to show</div>';
+    ['dl-kpi-total','dl-kpi-approved','dl-kpi-avg','dl-kpi-industries'].forEach(id => { const e = document.getElementById(id); if (e) e.textContent = '—'; });
+    ['dl-kpi-location','dl-kpi-priority'].forEach(id => { const e = document.getElementById(id); if (e) e.textContent = '—'; });
+    const c2 = document.getElementById('dl-msg-count'); if (c2) c2.textContent = '0 messages';
+    return;
+  }
+
+  // ── KPI strip ──
+  const approved = leads.filter(l => l.status === 'approved').length;
+  const scores   = leads.map(l => Number(l.security_score) || 0);
+  const avg      = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
+  const byInd    = dlCountBy(leads, 'industry');
+  const byLoc    = dlCountBy(leads, 'location');
+  const lvlCount = DL_LEVELS.map(d => ({ ...d, n: leads.filter(l => interestOf(l) === d.key).length }));
+  const topLvl  = [...lvlCount].sort((a, b) => b.n - a.n)[0];
+  const setTxt  = (id, v) => { const e = document.getElementById(id); if (e) e.textContent = v; };
+  setTxt('dl-kpi-total',       leads.length);
+  setTxt('dl-kpi-approved',    approved);
+  setTxt('dl-kpi-avg',         avg + '/100');
+  setTxt('dl-kpi-industries',  byInd.length);
+  setTxt('dl-kpi-location',    byLoc[0] ? byLoc[0][0] : '—');
+  const kp = document.getElementById('dl-kpi-priority');
+  if (kp) { kp.textContent = topLvl ? topLvl.key : '—'; kp.style.color = topLvl ? topLvl.color : '#1f1e2e'; }
+
+  drawDLDonut(leads, byInd);
+  drawDLHBars('dl-titles',    dlCountBy(leads, 'job_title'), ['#4648d4', '#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe']);
+  drawDLHBars('dl-locations', byLoc, ['#0ea5e9', '#38bdf8', '#7dd3fc', '#bae6fd', '#e0f2fe']);
+  drawDLInterest(lvlCount, leads.length);
+  drawDLScores(leads);
+  drawDLCompanies(leads);
+  drawDLTrend(leads);
+  renderDLMessages(leads);
+
+  const mc = document.getElementById('dl-msg-count');
+  const withMsg = leads.filter(l => l.message || l.subject_line).length;
+  if (mc) mc.textContent = `${withMsg} message${withMsg === 1 ? '' : 's'} drafted`;
+}
+
+function dlCountBy(leads, key) {
+  const m = {};
+  leads.forEach(l => { const k = l[key] || 'Unknown'; m[k] = (m[k] || 0) + 1; });
+  return Object.entries(m).sort((a, b) => b[1] - a[1]);
+}
+
+// ── Multi-segment donut (industries) ──
+function drawDLDonut(leads, byInd) {
+  const s = ctx2d('dl-donut'); if (!s) return;
+  const { ctx, W, H } = s;
+  const palette = ['#4648d4', '#0ea5e9', '#16a34a', '#f59e0b', '#ec4899', '#8b5cf6', '#14b8a6', '#64748b'];
+  const total = leads.length || 1;
+  const cx = W / 2, cy = H / 2, r = Math.max(18, Math.min(W, H) / 2 - 8), lw = Math.max(12, r * 0.38);
+  ctx.lineWidth = lw;
+  let a = -Math.PI / 2;
+  byInd.forEach(([, n], i) => {
+    const sweep = Math.PI * 2 * (n / total);
+    ctx.strokeStyle = palette[i % palette.length];
+    ctx.beginPath(); ctx.arc(cx, cy, r, a, a + sweep); ctx.stroke();
+    a += sweep;
+  });
+  ctx.fillStyle = '#1f1e2e'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.font = '700 16px Inter';
+  ctx.fillText(String(leads.length), cx, cy - 7);
+  ctx.fillStyle = '#464554'; ctx.font = '500 10px Inter';
+  ctx.fillText('leads', cx, cy + 9);
+  ctx.textBaseline = 'alphabetic';
+
+  const lg = document.getElementById('dl-donut-legend');
+  if (lg) lg.innerHTML = byInd.slice(0, 8).map(([k, n], i) =>
+    `<span style="display:flex;align-items:center;gap:5px;"><span style="width:9px;height:9px;border-radius:3px;background:${palette[i % palette.length]};display:inline-block;"></span>${esc(k)} <b style="color:#1f1e2e;">${n}</b></span>`
+  ).join('');
+}
+
+// ── Horizontal bars (titles / locations) ──
+function drawDLHBars(id, entries, colors) {
+  const s = ctx2d(id); if (!s) return;
+  const { ctx, W, H } = s;
+  const top = entries.slice(0, 7);
+  if (!top.length) return;
+  const max = top[0][1] || 1;
+  const rowH = H / top.length, barH = Math.min(14, rowH - 12);
+  const labelW = Math.min(96, W * 0.38), trackX = labelW + 6, trackW = W - trackX - 26;
+  top.forEach(([label, n], i) => {
+    const y = i * rowH + (rowH - barH) / 2;
+    // truncate label to fit
+    ctx.font = '600 10px Inter'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    let t = label;
+    while (t.length > 3 && ctx.measureText(t).width > labelW - 4) t = t.slice(0, -1);
+    ctx.fillStyle = '#464554';
+    ctx.fillText(t + (t !== label ? '…' : ''), 0, y + barH - 2);
+    // track + bar
+    ctx.fillStyle = '#f1f0f7';
+    ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(trackX, y, trackW, barH, [0, 6, 6, 0]); else ctx.rect(trackX, y, trackW, barH); ctx.fill();
+    const w = Math.max(4, (n / max) * trackW);
+    ctx.fillStyle = colors[i % colors.length];
+    ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(trackX, y, w, barH, [0, 6, 6, 0]); else ctx.rect(trackX, y, w, barH); ctx.fill();
+    // count
+    ctx.fillStyle = '#1f1e2e'; ctx.font = '700 10px Inter';
+    ctx.fillText(String(n), trackX + trackW + 5, y + barH - 2);
+  });
+}
+
+// ── Decision interest levels (vertical bars) ──
+function drawDLInterest(lvlCount, total) {
+  const s = ctx2d('dl-interest'); if (!s) return;
+  const { ctx, W, H } = s;
+  const max = Math.max(...lvlCount.map(d => d.n), 1);
+  const pL = 30, pR = 8, pT = 14, pB = 34;
+  const cw = W - pL - pR, ch = H - pT - pB;
+  const gap = cw / lvlCount.length, barW = Math.min(56, gap * 0.55);
+  // gridlines
+  ctx.strokeStyle = '#eef0f8'; ctx.lineWidth = 1;
+  [.25, .5, .75, 1].forEach(f => {
+    const y = pT + ch * (1 - f);
+    ctx.beginPath(); ctx.moveTo(pL, y); ctx.lineTo(W - pR, y); ctx.stroke();
+    ctx.fillStyle = '#767586'; ctx.font = '9px Inter'; ctx.textAlign = 'right';
+    ctx.fillText(Math.round(max * f), pL - 5, y + 3);
+  });
+  lvlCount.forEach((d, i) => {
+    const x = pL + i * gap + (gap - barW) / 2;
+    const h = d.n === 0 ? 0 : Math.max(3, (d.n / max) * ch);
+    const y = pT + ch - h;
+    ctx.fillStyle = d.color;
+    ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, barW, h, [4, 4, 0, 0]); else ctx.rect(x, y, barW, h); ctx.fill();
+    ctx.fillStyle = '#1f1e2e'; ctx.font = '700 11px Inter'; ctx.textAlign = 'center';
+    const pct = total ? Math.round(d.n / total * 100) : 0;
+    ctx.fillText(`${d.n} · ${pct}%`, x + barW / 2, y - 5);
+    // wrapped 2-line label
+    ctx.fillStyle = '#464554'; ctx.font = '600 9px Inter';
+    const words = d.key.split(' ');
+    if (words.length > 1) {
+      ctx.fillText(words[0], x + barW / 2, pT + ch + 13);
+      ctx.fillText(words.slice(1).join(' '), x + barW / 2, pT + ch + 24);
+    } else {
+      ctx.fillText(d.key, x + barW / 2, pT + ch + 18);
+    }
+  });
+  const lg = document.getElementById('dl-interest-legend');
+  if (lg) lg.innerHTML = lvlCount.map(d =>
+    `<span style="display:flex;align-items:center;gap:5px;"><span style="width:9px;height:9px;border-radius:3px;background:${d.color};display:inline-block;"></span>${esc(d.key)} <b style="color:#1f1e2e;">${d.n}</b></span>`
+  ).join('');
+}
+
+// ── Score spread ──
+function drawDLScores(leads) {
+  const s = ctx2d('dl-scores'); if (!s) return;
+  const { ctx, W, H } = s;
+  const buckets = [
+    { label: '90–100', test: v => v >= 90, color: '#16a34a' },
+    { label: '80–89',  test: v => v >= 80 && v < 90, color: '#65a30d' },
+    { label: '60–79',  test: v => v >= 60 && v < 80, color: '#d97706' },
+    { label: '0–59',   test: v => v < 60, color: '#dc2626' },
+  ];
+  const scores = leads.map(l => Number(l.security_score) || 0);
+  const counts = buckets.map(b => scores.filter(b.test).length);
+  const max = Math.max(...counts, 1);
+  const rowH = H / buckets.length, labelH = 13, barH = 10;
+  buckets.forEach((b, i) => {
+    const baseY = i * rowH;
+    ctx.textBaseline = 'alphabetic'; ctx.font = '600 10px Inter';
+    ctx.textAlign = 'left'; ctx.fillStyle = '#464554';
+    ctx.fillText(b.label, 1, baseY + 11);
+    ctx.textAlign = 'right'; ctx.font = '700 10px Inter';
+    ctx.fillStyle = counts[i] ? '#1f1e2e' : '#a5a4b3';
+    ctx.fillText(String(counts[i]), W - 1, baseY + 11);
+    const y = baseY + labelH;
+    ctx.fillStyle = '#f1f0f7';
+    ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(0, y, W, barH, [0, 5, 5, 0]); else ctx.rect(0, y, W, barH); ctx.fill();
+    const w = counts[i] === 0 ? 0 : Math.max(5, (counts[i] / max) * W);
+    if (w > 0) {
+      ctx.fillStyle = b.color;
+      ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(0, y, w, barH, [0, 5, 5, 0]); else ctx.rect(0, y, w, barH); ctx.fill();
+    }
+  });
+}
+
+// ── Company leaderboard (HTML) ──
+function drawDLCompanies(leads) {
+  const el = document.getElementById('dl-companies'); if (!el) return;
+  const m = {};
+  leads.forEach(l => {
+    const k = l.company || 'Unknown';
+    (m[k] = m[k] || { n: 0, scores: [], industry: l.industry || '', loc: l.location || '' });
+    m[k].n++; m[k].scores.push(Number(l.security_score) || 0);
+    if (!m[k].loc && l.location) m[k].loc = l.location;
+  });
+  const rows = Object.entries(m)
+    .map(([name, v]) => ({ name, n: v.n, avg: Math.round(v.scores.reduce((a, b) => a + b, 0) / v.scores.length), industry: v.industry, loc: v.loc }))
+    .sort((a, b) => b.n - a.n || b.avg - a.avg)
+    .slice(0, 8);
+  const max = rows[0] ? rows[0].n : 1;
+  el.innerHTML = rows.map((r, i) => `
+    <div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-top:${i ? '1px solid #eef0f8' : 'none'};">
+      <span style="width:20px;height:20px;border-radius:6px;background:${i < 3 ? '#e0e1ff' : '#f1f0f7'};color:${i < 3 ? '#4648d4' : '#464554'};font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">${i + 1}</span>
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:600;color:#1f1e2e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(r.name)}</div>
+        <div style="font-size:10px;color:#464554;">${esc(r.industry)}${r.loc ? ' · ' + esc(r.loc) : ''}</div>
+      </div>
+      <div style="flex-shrink:0;text-align:right;">
+        <div style="font-weight:700;color:#1f1e2e;">${r.n} lead${r.n > 1 ? 's' : ''}</div>
+        <div style="font-size:10px;color:${r.avg >= 85 ? '#16a34a' : r.avg >= 70 ? '#d97706' : '#dc2626'};">avg ${r.avg}/100</div>
+      </div>
+      <div style="width:56px;height:6px;background:#f1f0f7;border-radius:3px;overflow:hidden;flex-shrink:0;">
+        <div style="height:6px;width:${Math.round(r.n / max * 100)}%;background:#4648d4;border-radius:3px;"></div>
+      </div>
+    </div>`).join('');
+}
+
+// ── Trend over time (bars per day) ──
+function drawDLTrend(leads) {
+  const s = ctx2d('dl-trend'); if (!s) return;
+  const { ctx, W, H } = s;
+  const byDay = {};
+  leads.forEach(l => {
+    const d = String(l.created_at || '').slice(0, 10);
+    if (d) byDay[d] = (byDay[d] || 0) + 1;
+  });
+  const days = Object.entries(byDay).sort((a, b) => a[0].localeCompare(b[0])).slice(-14);
+  if (days.length < 2) {
+    ctx.fillStyle = '#a5a4b3'; ctx.font = '12px Inter'; ctx.textAlign = 'center';
+    ctx.fillText(days.length ? `${days[0][1]} leads on ${days[0][0]}` : 'No timestamps available', W / 2, H / 2);
+    return;
+  }
+  const max = Math.max(...days.map(d => d[1]), 1);
+  const pL = 30, pR = 10, pT = 14, pB = 26;
+  const cw = W - pL - pR, ch = H - pT - pB;
+  const gap = cw / days.length, barW = Math.min(30, gap * 0.6);
+  ctx.strokeStyle = '#eef0f8'; ctx.lineWidth = 1;
+  [.5, 1].forEach(f => {
+    const y = pT + ch * (1 - f);
+    ctx.beginPath(); ctx.moveTo(pL, y); ctx.lineTo(W - pR, y); ctx.stroke();
+    ctx.fillStyle = '#767586'; ctx.font = '9px Inter'; ctx.textAlign = 'right';
+    ctx.fillText(Math.round(max * f), pL - 5, y + 3);
+  });
+  days.forEach(([day, n], i) => {
+    const x = pL + i * gap + (gap - barW) / 2;
+    const h = Math.max(3, (n / max) * ch);
+    const y = pT + ch - h;
+    ctx.fillStyle = n === max ? '#4648d4' : '#a5b4fc';
+    ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x, y, barW, h, [3, 3, 0, 0]); else ctx.rect(x, y, barW, h); ctx.fill();
+    ctx.fillStyle = '#1f1e2e'; ctx.font = '700 9px Inter'; ctx.textAlign = 'center';
+    ctx.fillText(String(n), x + barW / 2, y - 4);
+    ctx.fillStyle = '#767586'; ctx.font = '9px Inter';
+    ctx.fillText(day.slice(5), x + barW / 2, H - 8);   // MM-DD
+  });
+}
+
+// ── Messages list (HTML) ──
+function renderDLMessages(leads) {
+  const el = document.getElementById('dl-messages'); if (!el) return;
+  const withMsg = leads.filter(l => l.message || l.subject_line).slice(0, 30);
+  if (!withMsg.length) { el.innerHTML = '<div style="color:#a5a4b3;padding:20px;text-align:center;">No messages to show</div>'; return; }
+  el.innerHTML = withMsg.map(l => {
+    const lvl = DL_LEVELS.find(d => d.key === interestOf(l)) || DL_LEVELS[4];
+    const snippet = String(l.message || '').slice(0, 220);
+    return `<div style="border:1px solid #eef0f8;border-radius:10px;padding:12px 14px;background:#fff;">
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;">
+        <div style="min-width:0;">
+          <span style="font-weight:700;font-size:13px;">${esc(l.full_name)}</span>
+          <span style="font-size:11px;color:#464554;"> · ${esc(l.job_title)} · ${esc(l.company)}${l.location ? ' · ' + esc(l.location) : ''}</span>
+        </div>
+        <div style="display:flex;gap:6px;flex-shrink:0;">
+          <span class="tag" style="background:${lvl.bg};color:${lvl.color};">${esc(lvl.key)}</span>
+          <span class="tag ${scoreClass(Number(l.security_score) || 0)}">${Number(l.security_score) || 0}/100</span>
+        </div>
+      </div>
+      ${l.subject_line ? `<div style="font-size:12px;font-weight:600;color:#1f1e2e;margin-top:7px;"> Subject: ${esc(l.subject_line)}</div>` : ''}
+      ${snippet ? `<div style="font-size:12px;color:#464554;margin-top:4px;line-height:1.5;">${esc(snippet)}${String(l.message || '').length > 220 ? '…' : ''}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+// ── PDF export (html2canvas + jsPDF, print fallback) ──
+function dlLoadScript(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.onload = res; s.onerror = () => rej(new Error('failed: ' + src));
+    document.head.appendChild(s);
+  });
+}
+
+async function downloadPDF() {
+  const btn = document.getElementById('dl-pdf-btn');
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="material-symbols-outlined spin" style="font-size:18px;">progress_activity</span> Generating PDF…'; }
+  try {
+    if (!window.html2canvas) await dlLoadScript('https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js');
+    if (!window.jspdf)       await dlLoadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    const el = document.getElementById('dl-report');
+    window.scrollTo(0, 0);
+    // aim for ~1200px-wide capture so text stays crisp in the PDF
+    const scale = Math.max(2, Math.round(1200 / Math.max(1, el.offsetWidth) * 100) / 100);
+    const canvas = await html2canvas(el, {
+      scale, backgroundColor: '#f8f9ff', useCORS: true, logging: false,
+      windowWidth: document.documentElement.clientWidth,
+    });
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pw = pdf.internal.pageSize.getWidth(), ph = pdf.internal.pageSize.getHeight();
+    const imgW = pw - 10, imgH = canvas.height * imgW / canvas.width;
+    const img = canvas.toDataURL('image/jpeg', 0.92);
+    pdf.addImage(img, 'JPEG', 5, 0, imgW, imgH);
+    let left = imgH - ph, pos = 0;
+    while (left > 0) {
+      pos -= ph; pdf.addPage(); pdf.addImage(img, 'JPEG', 5, pos, imgW, imgH); left -= ph;
+    }
+    pdf.save(`agentflow-decision-report-${new Date().toISOString().slice(0, 10)}.pdf`);
+    showToast('✓ PDF downloaded');
+  } catch (e) {
+    console.error(e);
+    showToast('⚠ PDF libraries unavailable — opening print dialog (choose "Save as PDF")');
+    setTimeout(() => window.print(), 500);
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = orig; }
+  }
+}
+
 
 // ── Actions ───────────────────────────────────────────────────────────────────
 async function doApprove(id, approved) {
@@ -949,6 +2001,257 @@ async function triggerPipeline() {
   setTimeout(()=>{ btn.disabled=false; btn.innerHTML='<span class="material-symbols-outlined" style="font-size:18px;">play_arrow</span> Run Pipeline Now'; }, 2000);
 }
 
+// ── AI Agent Runner (Run now / Schedule / live output) ────────────────────────
+const $ag = id => document.getElementById(id);
+const esc = s => String(s==null?'':s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function agentStatus(text, color, bg) {
+  const el = $ag('agent-status');
+  if (!el) return;
+  el.textContent = text;
+  el.style.color = color; el.style.background = bg;
+}
+
+function agentParams() {
+  return {
+    industry:  ($ag('ag-industry')||{}).value  || 'SaaS',
+    job_title: ($ag('ag-jobtitle')||{}).value || 'Head of Growth',
+    location:  ($ag('ag-location')||{}).value  || 'United States',
+    limit:     parseInt(($ag('ag-limit')||{}).value) || 3,
+  };
+}
+
+// Render one lead as a card inside #agent-output
+function renderLead(l) {
+  const approved = (l.status||'').toLowerCase()==='approved';
+  const score = l.security_score != null ? l.security_score : '—';
+  const color = approved ? '#16a34a' : '#dc2626';
+  return `<div style="border:1px solid #c7c4d7;border-radius:10px;padding:14px;margin-bottom:10px;background:#faf9fd;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;">
+      <b>${esc(l.full_name||'Unknown')}</b>
+      <span class="tag" style="background:${approved?'#dcfce7':'#fee2e2'};color:${color};">
+        ${approved?'✓ Approved':'✗ Rejected'} · ${score}/100
+      </span>
+    </div>
+    <div style="font-size:12px;color:#464554;margin:4px 0 8px;">
+      ${esc(l.job_title||'')} · ${esc(l.company||'')} · ${esc(l.location||'')}
+      ${l.email?` · ✉ ${esc(l.email)}`:''}
+    </div>
+    ${l.subject_line?`<div style="font-size:13px;"><b>Subject:</b> ${esc(l.subject_line)}</div>`:''}
+    ${l.message?`<div style="font-size:13px;margin-top:4px;color:#1f1e2e;">${esc(l.message)}</div>`:''}
+    ${l.security_reasons && l.security_reasons.length
+      ? `<div style="font-size:11px;color:#464554;margin-top:6px;">Checks: ${l.security_reasons.map(esc).join(' · ')}</div>` : ''}
+  </div>`;
+}
+
+// Draw the whole last-run state into #agent-output
+function renderAgentOutput(run) {
+  const out = $ag('agent-output');
+  if (!out) return;
+  if (!run || run.status==='idle' || (!run.leads || !run.leads.length && run.status!=='running')) {
+    if (run && run.status==='failed')
+      out.innerHTML = `<p style="color:#dc2626;">⚠ Run failed: ${esc(run.error||'unknown error')}</p>`;
+    else
+      out.innerHTML = `<p style="color:#464554;">No run yet — click <b>Run now</b> to watch the agents work.</p>`;
+    return;
+  }
+  const p = run.params||{}, s = run.summary||{};
+  let html = `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;font-size:12px;color:#464554;">
+      <span class="tag" style="background:#ede9fe;color:#4648d4;">${esc(p.industry||'')} · ${esc(p.job_title||'')} · ${esc(p.location||'')}</span>
+      ${s.total!=null?`<span class="tag" style="background:#eef2ff;color:#4648d4;">${s.approved}/${s.total} approved</span>`:''}
+      ${s.avg_security_score?`<span class="tag" style="background:#dcfce7;color:#16a34a;">avg ${s.avg_security_score}/100</span>`:''}
+      <span>${esc(run.trigger||'')}</span>
+    </div>`;
+  if (run.status==='running') {
+    html += `<div style="color:#4648d4;">⏳ Agents running — Scout → Analyst → Writer → Guard…</div>`;
+  } else if (run.leads && run.leads.length) {
+    html += run.leads.map(renderLead).join('');
+  } else {
+    html += `<p style="color:#464554;">Run finished but no leads were returned.</p>`;
+  }
+  out.innerHTML = html;
+}
+
+// Poll /last-run until the pipeline finishes, then render results
+async function pollAgentRun(maxTries=90, delayMs=4000) {
+  for (let i=0;i<maxTries;i++) {
+    try {
+      const r = await fetch(`${API}/last-run`);
+      const data = await r.json();
+      const run = data.run || {};
+      renderAgentOutput(run);
+      renderLiveRun(run);        // live row under the scheduled jobs (Running → Done)
+      if (run.status==='completed') {
+        agentStatus('● Completed','#16a34a','#dcfce7');
+        showToast('✅ Pipeline complete — results below');
+        renderLiveRun(run);      // flip the row to "Done · fired 1×"
+        loadAll();               // refresh KPIs + tables with fresh data
+        dlInvalidate();          // Download report picks up the new run too
+        return;
+      }
+      if (run.status==='failed') {
+        agentStatus('● Failed','#dc2626','#fee2e2');
+        setAgentStates('failed');
+        showToast('⚠ Pipeline failed — see output');
+        return;
+      }
+      agentStatus('● Running','#4648d4','#ede9fe');
+      setAgentStates('running');
+      const asub = document.getElementById('analytics-sub');
+      if (asub) asub.textContent = '⏳ Agents running — Scout → Analyst → Writer → Guard… charts update when they finish.';
+      const atrig = document.getElementById('analytics-trigger');
+      if (atrig) { atrig.textContent = 'running'; atrig.style.background = '#ede9fe'; atrig.style.color = '#4648d4'; }
+    } catch { /* server briefly busy — keep polling */ }
+    await new Promise(res=>setTimeout(res,delayMs));
+  }
+  agentStatus('● Timed out','#d97706','#fef3c7');
+}
+
+// "Run now" — start a pipeline with the user's inputs, then watch it live
+async function agentRunNow() {
+  const btn = $ag('ag-run-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Running…'; }
+  agentStatus('● Starting','#4648d4','#ede9fe');
+  setAgentStates('running');
+  $ag('agent-output').innerHTML = `<div style="color:#4648d4;">⏳ Dispatching agents — Scout → Analyst → Writer → Guard…</div>`;
+  // Show the live row right away so the user sees it's running under the job list
+  renderLiveRun({ status:'running', params: agentParams(), started_at: new Date().toISOString() });
+  try {
+    const body = Object.assign(agentParams(), { trigger:'dashboard' });
+    const r = await fetch(`${API}/run`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    if (!r.ok) throw new Error('run rejected');
+    showToast('🚀 Agents launched — watch them work below');
+    loadJobs();        // refresh the job list, then keep the live row on top
+    renderLiveRun({ status:'running', params: agentParams(), started_at: new Date().toISOString() });
+    pollAgentRun();
+  } catch {
+    agentStatus('● Offline','#dc2626','#fee2e2');
+    $ag('agent-output').innerHTML = `<p style="color:#dc2626;">⚠ Could not reach the API — is the FastAPI server running?</p>`;
+  }
+  if (btn) { btn.disabled=false; btn.innerHTML = '<span class="material-symbols-outlined" style="font-size:18px;">play_arrow</span> Run now'; }
+}
+
+// "Schedule" — save a job; n8n polls /jobs/due and triggers it at that time
+function agTime24() {
+  // build "HH:MM" (24h) from the Hour / Minute / AM-PM dropdowns
+  const h  = parseInt(($ag('ag-time-h')||{}).value || '9', 10) % 12;   // 12 → 0
+  const m  = String(($ag('ag-time-m')||{}).value || '00').padStart(2, '0');
+  const ap = (($ag('ag-time-ampm')||{}).value || 'AM').toUpperCase();
+  const hh = (ap === 'PM' ? h + 12 : h) % 24;
+  return String(hh).padStart(2, '0') + ':' + m;
+}
+
+async function agentSchedule() {
+  const minutes  = parseInt(($ag('ag-minutes')||{}).value);
+  const timeOfDay = agTime24();
+  const repeat   = ($ag('ag-repeat')||{}).value || 'once';
+  const body = agentParams();
+  if (minutes) { body.schedule_kind='once'; body.run_in_minutes=minutes; }
+  else { body.schedule_kind=repeat; body.time_of_day=timeOfDay||'09:00'; }
+  try {
+    const r = await fetch(`${API}/schedule`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.detail||'schedule failed');
+    showToast('⏰ ' + (data.message||'Scheduled! n8n will trigger it.'));
+    loadJobs();
+  } catch (e) {
+    showToast('⚠ Could not schedule: ' + (e.message||'unknown error'));
+  }
+}
+
+// List scheduled jobs (Design A — n8n fires these)
+async function loadJobs() {
+  const el = $ag('agent-jobs');
+  if (!el) return;
+  try {
+    const r = await fetch(`${API}/jobs`);
+    const data = await r.json();
+    const jobs = data.jobs || [];
+    if (!jobs.length) { el.innerHTML = ''; return; }
+    const badge = st => {
+      const m = { pending:['#ede9fe','#4648d4','Pending'], triggered:['#dcfce7','#16a34a','Triggered'],
+                  done:['#e0f2fe','#0369a1','Done'], failed:['#fee2e2','#dc2626','Failed'] };
+      const [bg,fg,txt] = m[st] || ['#f1f0f7','#464554',st];
+      return `<span class="tag" style="background:${bg};color:${fg};">${txt}</span>`;
+    };
+    el.innerHTML = `<div style="font-size:11px;font-weight:600;color:#464554;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">
+        ⏰ Scheduled runs (n8n triggers these)
+      </div>` +
+      jobs.map(j => `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12px;padding:7px 0;border-top:1px solid #ececF3;">
+        <b>#${j.id}</b> ${esc(j.industry)} · ${esc(j.job_title)} · ${esc(j.location)}
+        <span style="color:#464554;">${j.schedule_kind==='daily'?'daily at '+esc(fmt12(j.time_of_day||'')):''} ${esc((j.run_at||'').replace('T',' ').slice(0,16))}</span>
+        ${badge(j.status)}
+        <span style="color:#464554;">fired ${j.trigger_count||0}×</span>
+      </div>`).join('');
+  } catch { /* ignore */ }
+}
+
+// ── Live "Run now" row — appears under the scheduled jobs while agents work ──
+function renderLiveRun(run) {
+  const el = $ag('agent-live');
+  if (!el) return;
+  const hasLeads = !!(run && run.leads && run.leads.length);
+  if (!run || run.status === 'idle' || (run.status !== 'running' && !hasLeads)) {
+    el.innerHTML = '';            // nothing running & nothing to report
+    return;
+  }
+  const p = run.params || {}, s = run.summary || {};
+  const started = (run.started_at || '').replace('T', ' ').slice(0, 16);
+
+  // Same visual language as the scheduled rows: params · time · badge · fired N×
+  const badge = () => {
+    if (run.status === 'running')  return `<span class="tag" style="background:#ede9fe;color:#4648d4;">● Running</span>`;
+    if (run.status === 'completed')return `<span class="tag" style="background:#e0f2fe;color:#0369a1;">Done</span>`;
+    if (run.status === 'failed')   return `<span class="tag" style="background:#fee2e2;color:#dc2626;">Failed</span>`;
+    return `<span class="tag" style="background:#f1f0f7;color:#464554;">${esc(run.status)}</span>`;
+  };
+  // "fired N×" mirrors the scheduled rows; a live run counts as 1 execution
+  const fired = run.status === 'running'
+    ? `<span style="color:#464554;">firing…</span>`
+    : `<span style="color:#464554;">fired 1×</span>`;
+
+  const prog = run.status === 'running'
+    ? `<div style="display:inline-block;width:12px;height:12px;border:2px solid #c7d2fe;border-top-color:#4648d4;border-radius:50%;animation:spin .8s linear infinite;vertical-align:-2px;"></div>`
+    : '';
+
+  el.innerHTML = `<div style="font-size:11px;font-weight:600;color:#464554;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px;">
+      🤖 Live agent run (Run now)
+    </div>` +
+    `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12px;padding:7px 0;border-top:1px solid #ececF3;">
+      ${prog}
+      <b>Live</b> ${esc(p.industry||'')} · ${esc(p.job_title||'')} · ${esc(p.location||'')}
+      <span style="color:#464554;">${started}</span>
+      ${badge()}
+      ${fired}
+      ${run.status==='completed' && s.total!=null
+        ? `<span style="color:#464554;">${s.approved}/${s.total} approved · avg ${s.avg_security_score||0}/100</span>` : ''}
+      ${run.status==='failed' ? `<span style="color:#dc2626;">${esc(run.error||'error')}</span>` : ''}
+    </div>`;
+}
+
+// ── Init: show last run + jobs as soon as the dashboard opens ─────────────────
+function fmt12(hhmm) {
+  // "09:00" → "9:00 AM" (matches the AM/PM dropdown the user chose)
+  const m = /^(\d{1,2}):(\d{2})/.exec(hhmm || '');
+  if (!m) return hhmm || '';
+  let h = parseInt(m[1], 10);
+  const ap = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  return `${h}:${m[2]} ${ap}`;
+}
+(async function initAgentRunner(){
+  try {
+    const r = await fetch(`${API}/last-run`);
+    const data = await r.json();
+    const run = data.run || {};
+    if (run.status==='running') { agentStatus('● Running','#4648d4','#ede9fe'); pollAgentRun(); }
+    else if (run.status==='completed') { agentStatus('● Completed','#16a34a','#dcfce7'); }
+    else if (run.status==='failed') { agentStatus('● Failed','#dc2626','#fee2e2'); }
+    renderAgentOutput(run);
+  } catch { /* API offline — leave the idle placeholder */ }
+  loadJobs();
+})();
+
 // ── Load All ──────────────────────────────────────────────────────────────────
 async function loadAll() {
   // Visual feedback on all refresh buttons
@@ -959,16 +2262,26 @@ async function loadAll() {
   });
 
   try {
-    [allLeads, allRuns] = await Promise.all([fetchLeads(), fetchRuns()]);
-    renderKPIs(allLeads, allRuns);
-    renderDashLeads(allLeads);
-    renderSecurityFeed(allLeads);
-    renderChart(allRuns);
+    const [lastRun, runs, dbLeads] = await Promise.all([fetchLastRun(), fetchRuns(), fetchLeads()]);
+    allRuns = runs;
+    allLeads = dbLeads;                          // real DB rows for Leads/Security pages
+
+    // Dashboard panels come ONLY from the agent/n8n run output — never mock data
+    const hasRun   = !!(lastRun && lastRun.status && lastRun.status !== 'idle' && (lastRun.leads || []).length);
+    const runLeads = hasRun ? (lastRun.leads || []) : [];
+
+    renderKPIs(runLeads, runs, lastRun);
+    renderDashLeads(runLeads);
+    renderSecurityFeed(runLeads);
+    renderAnalytics(lastRun, hasRun);
+    renderChart(runs);
+    renderLiveRun(lastRun);      // keep the live job row in sync (also covers n8n runs)
+
     filterLeads();
-    renderSecurityPage(allLeads);
-    showToast('✓ Data refreshed');
-  } catch(e) {
-    showToast('⚠ Refresh failed — using cached data');
+    renderSecurityPage(dbLeads);
+    showToast('✓ Dashboard synced');
+  } catch (e) {
+    showToast('⚠ Could not reach the API');
   }
 
   document.querySelectorAll('[data-refresh]').forEach(btn => {
@@ -979,6 +2292,21 @@ async function loadAll() {
 
 loadAll();
 setInterval(loadAll, 30000);
+
+// ── Download report stays LIVE while it's open (syncs with new agent runs) ─────
+setInterval(() => {
+  if (document.getElementById('page-download')?.classList.contains('active')) loadDownload(true);
+}, 30000);
+
+// ── Responsive: redraw canvases when the viewport changes width ───────────────
+let _rszT;
+window.addEventListener('resize', () => {
+  clearTimeout(_rszT);
+  _rszT = setTimeout(() => {
+    if (document.getElementById('page-download')?.classList.contains('active')) renderDownload();
+    else if (document.getElementById('page-dashboard')?.classList.contains('active')) loadAll();
+  }, 250);
+});
 </script>
 </body>
 </html>

@@ -1,0 +1,6 @@
+# ─── AgentFlow — legacy extras (NOT needed to serve the app) ───────────────────
+# Only required for the legacy `streamlit run dashboard.py` view. The main
+# dashboard served by FastAPI at /dashboard uses none of these.
+# Kept separate so the cloud build (Render free) installs only what it needs.
+streamlit>=1.35.0
+plotly>=5.20.0

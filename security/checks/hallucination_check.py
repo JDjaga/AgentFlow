@@ -16,13 +16,14 @@ Scoring:
 import os
 import re
 import json
-import httpx
 from dataclasses import dataclass
 from loguru import logger
 
+from llm_config import llm_manager
+
 
 MAX_SCORE    = 20
-OLLAMA_TIMEOUT = 45
+LLM_TIMEOUT  = 45
 
 
 @dataclass
@@ -41,8 +42,9 @@ class HallucinationCheck:
     """Cross-references outreach message facts against Scout's lead data."""
 
     def __init__(self):
-        self.ollama_url   = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        self.ollama_model = os.getenv("OLLAMA_MODEL", "llama3.2")
+        # LLM access goes through llm_manager (OpenRouter→Groq→HF→Ollama failover),
+        # so this check works both locally and when cloud-hosted.
+        self.llm = llm_manager
 
     def run(self, message: str, lead_data: dict) -> HallucinationResult:
         """
@@ -84,13 +86,13 @@ class HallucinationCheck:
         )
 
         try:
-            response = httpx.post(
-                f"{self.ollama_url}/api/generate",
-                json={"model": self.ollama_model, "prompt": prompt, "stream": False},
-                timeout=OLLAMA_TIMEOUT,
+            raw = self.llm.complete(
+                prompt,
+                system="You are a meticulous fact-checker. Respond only with the requested JSON.",
+                max_tokens=300,
+                temperature=0.0,
+                timeout=LLM_TIMEOUT,
             )
-            response.raise_for_status()
-            raw = response.json().get("response", "")
 
             json_match = re.search(r'\{.*\}', raw, re.DOTALL)
             if json_match:

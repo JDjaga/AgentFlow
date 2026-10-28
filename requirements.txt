@@ -7,18 +7,21 @@ crewai>=0.80.0,<2.0.0
 crewai-tools>=0.4.0,<1.0.0
 
 # LLM integrations
+# (no `ollama` package needed — Ollama is reached through litellm, which CrewAI
+# already ships; in the cloud, llm_config.py talks to OpenRouter/Groq/HF.)
 langchain>=0.2.0,<0.4.0
 langchain-community>=0.2.0,<0.4.0
-ollama>=0.1.8
 
 # OCR (Analyst agent)
+# pytesseract is the Python wrapper (imported at module load by tools/ocr_tool).
+# The tesseract binary is optional — only needed if the Analyst OCRs real images.
 pytesseract>=0.3.10
 Pillow>=10.0.0
-opencv-python>=4.9.0.80
 
 # Database
+# (no sqlalchemy/opencv — nothing in the app imports them; trimmed so the
+# Render free build stays well inside its limits.)
 psycopg2-binary>=2.9.9
-sqlalchemy>=2.0.0
 
 # Lead data sources
 requests>=2.31.0
@@ -34,8 +37,10 @@ rich>=13.0.0
 loguru>=0.7.0
 
 # ─── Phase 4: Dashboard ──────────────────────────────────────────────────────
-streamlit>=1.35.0
-plotly>=5.20.0
+# The served dashboard (static/dashboard.html at /dashboard) needs NONE of
+# these — streamlit/plotly are only for the legacy `dashboard.py` variant and
+# are kept out of requirements.txt so the Render free build stays fast/small.
+# If you want the legacy Streamlit view:  pip install -r requirements-legacy.txt
 
 # ─── Phase 3: API & Feedback Loop ────────────────────────────────────────────
 fastapi>=0.110.0

@@ -16,6 +16,7 @@ LLM Note: CrewAI 1.x uses LiteLLM under the hood.
 import os
 from crewai import Agent
 from tools.lead_scraper import LeadScraperTool
+from llm_config import llm_manager
 from loguru import logger
 
 
@@ -47,10 +48,10 @@ def build_scout() -> Agent:
     )
 
 
-def _get_llm() -> str:
+def _get_llm():
     """
-    Returns the LLM identifier string for CrewAI 1.x (LiteLLM format).
-    Phase 2 will have Ollama running locally.
+    Returns the LLM for the Scout via the provider manager (llm_config).
+    Uses LLM_PROVIDERS priority chain (openrouter → groq → huggingface → ollama)
+    with timeout-based failover, so it works both locally and when cloud-hosted.
     """
-    model = os.getenv("OLLAMA_MODEL", "llama3.2")
-    return f"ollama/{model}"
+    return llm_manager.get_crewai_llm()

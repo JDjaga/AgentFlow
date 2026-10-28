@@ -1,0 +1,39 @@
+# Render.com Blueprint — AgentFlow (free-tier friendly, NO credit card needed)
+# Deploy via: Render Dashboard → New → Blueprint → point at this repo.
+#
+# The LLM layer (llm_config.py) makes this hostable WITHOUT local Ollama:
+# it calls OpenRouter / Groq / Hugging Face over HTTPS with automatic failover.
+#
+# Env vars to set in the Render dashboard (Settings → Environment):
+#   OPENROUTER_API_KEY=...        (primary LLM — get one free at openrouter.ai)
+#   GROQ_API_KEY=...              (fastest free fallback)
+#   HUGGINGFACEHUB_API_TOKEN=...  (optional backup)
+#   DATABASE_URL=postgres://...   (Neon/Supabase connection string — PRIMARY DB var,
+#                                  db_config.py parses it and applies sslmode=require)
+#   LLM_PROVIDERS is preset below to the verified working chain.
+#
+# Scheduled runs WITHOUT hosting n8n: point a free cron (cron-job.org, no card)
+# at POST https://<your-app>.onrender.com/scheduler/tick every 5 minutes.
+
+services:
+  - type: web
+    name: agentflow-api
+    runtime: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn api.server:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: "/status"
+    envVars:
+      # Verified working failover chain (llm_config.py default). Do NOT add
+      # anthropic/openai/gemini here unless you also set their API keys —
+      # a keyless provider in the chain just wastes probe time.
+      - key: LLM_PROVIDERS
+        value: "openrouter,groq,huggingface,ollama"
+      - key: LLM_TIMEOUT
+        value: "25"
+      - key: PYTHON_VERSION
+        value: "3.12.0"
+      # DATABASE_URL is added in the Render dashboard (paste Neon/Supabase
+      # connection string). It can be secret. localhost won't work in the
+      # cloud and Render free has no persistent Postgres of its own.
+      # API keys: OPENROUTER_API_KEY, GROQ_API_KEY, HUGGINGFACEHUB_API_TOKEN.

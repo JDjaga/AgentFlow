@@ -20,6 +20,7 @@ Environment:
 
 import os
 import json
+import threading
 import psycopg2
 from typing import Optional
 from datetime import datetime
@@ -37,17 +38,111 @@ from feedback import FeedbackLoop
 load_dotenv()
 console = Console()
 
+# ─── Last-run store (in-memory) ───────────────────────────────────────────────
+# Lets the dashboard/API show the most recent pipeline output even when the DB
+# is unavailable (local demo / Render free-tier cold start). On a restart this
+# resets to idle — the DB remains the source of truth when connected.
+_last_lock = threading.Lock()
+LAST_RUN = {
+    "status":      "idle",   # idle | running | completed | failed
+    "params":      {},
+    "leads":       [],       # secured leads from the last run
+    "summary":     {},       # {total, approved, rejected, avg_security_score}
+    "trigger":     "",
+    "started_at":  None,
+    "completed_at": None,
+    "error":       "",
+}
+
+
+def _set_last_run(**kwargs):
+    with _last_lock:
+        LAST_RUN.update(kwargs)
+
+
+def get_last_run() -> dict:
+    with _last_lock:
+        return json.loads(json.dumps(LAST_RUN))  # deep copy (safe for API)
+
+
+def hydrate_last_run_from_db() -> bool:
+    """Restore LAST_RUN from PostgreSQL after a restart (Render deploys, crashes).
+
+    The in-memory snapshot dies with the process, but the DB keeps every run's
+    leads. We rebuild the most recent *completed* run so the dashboard isn't
+    blank after the server comes back up.
+    """
+    try:
+        conn = get_db_connection()
+        cur  = conn.cursor()
+        cur.execute("""
+            SELECT id, status, trigger_source, started_at, completed_at
+            FROM pipeline_runs
+            WHERE status = 'completed'
+            ORDER BY completed_at DESC LIMIT 1
+        """)
+        row = cur.fetchone()
+        if not row:
+            cur.close(); conn.close(); return False
+        run_id, status, trigger, started_at, completed_at = row
+
+        # Rebuild the leads this run produced (most recent N outreach rows).
+        cur.execute("""
+            SELECT l.full_name, l.job_title, l.company, l.industry, l.location,
+                   l.email, l.linkedin_url, l.source_url, l.source,
+                   l.raw_data->>'analyst_notes' AS analyst_notes,
+                   o.subject_line, o.message, o.security_score, o.security_log,
+                   o.status, o.rejection_reason
+            FROM outreach o
+            JOIN leads l ON l.id = o.lead_id
+            ORDER BY o.created_at DESC
+            LIMIT 50
+        """)
+        cols = ["full_name", "job_title", "company", "industry", "location",
+                "email", "linkedin_url", "source_url", "source", "analyst_notes",
+                "subject_line", "message", "security_score", "security_log",
+                "status", "rejection_reason"]
+        leads = []
+        for r in cur.fetchall():
+            item = dict(zip(cols, r))
+            log = item.get("security_log")
+            if isinstance(log, str):
+                try: item["security_log"] = json.loads(log)
+                except Exception: pass
+            leads.append(item)
+        cur.close(); conn.close()
+
+        if not leads:
+            return False
+
+        approved   = [x for x in leads if x.get("status") == "approved"]
+        scores     = [int(x.get("security_score") or 0) for x in leads]
+        avg        = round(sum(scores) / len(scores)) if scores else 0
+        _set_last_run(
+            status="completed",
+            trigger=trigger or "dashboard",
+            started_at=str(started_at) if started_at else None,
+            completed_at=str(completed_at) if completed_at else None,
+            leads=leads,
+            summary={"total": len(leads), "approved": len(approved),
+                     "rejected": len(leads) - len(approved),
+                     "avg_security_score": avg},
+            error="",
+        )
+        logger.info(f"Hydrated LAST_RUN from DB — run #{run_id}, {len(leads)} leads")
+        return True
+    except Exception as e:
+        logger.warning(f"Could not hydrate LAST_RUN from DB: {e}")
+        return False
+
 
 # ─── Database ─────────────────────────────────────────────────────────────────
 
 def get_db_connection():
-    return psycopg2.connect(
-        host=os.getenv("POSTGRES_HOST", "localhost"),
-        port=int(os.getenv("POSTGRES_PORT", 5432)),
-        dbname=os.getenv("POSTGRES_DB", "agentflow_db"),
-        user=os.getenv("POSTGRES_USER", "agentflow"),
-        password=os.getenv("POSTGRES_PASSWORD", "agentflow_secret"),
-    )
+    # Cloud-ready: honours DATABASE_URL (Neon/Supabase) or POSTGRES_* vars,
+    # and applies sslmode=require for remote hosts. See db_config.py.
+    from db_config import get_conn
+    return get_conn()
 
 
 def save_results(leads: list, run_id: int):
@@ -155,6 +250,15 @@ def run_pipeline(
 
     run_id = start_pipeline_run(trigger)
 
+    _set_last_run(
+        status="running",
+        params={"industry": industry, "job_title": job_title,
+                "location": location, "limit": limit},
+        trigger=trigger,
+        started_at=datetime.now().isoformat(),
+        completed_at=None, error="", leads=[], summary={},
+    )
+
     # ── Phase 3: Load feedback from previous rejections ───────────────────────
     feedback_loop    = FeedbackLoop()
     feedback_context = feedback_loop.get_feedback_context()
@@ -177,37 +281,42 @@ def run_pipeline(
         verbose=True,
     )
 
-    console.print("\n[bold green]Starting agent pipeline...[/bold green]\n")
-    result = crew.kickoff(inputs={
-        "industry":  industry,
-        "job_title": job_title,
-        "location":  location,
-        "limit":     limit,
-    })
-
-    raw_output = result.raw if hasattr(result, "raw") else str(result)
-
-    # ── Phase 2: Security Guard ───────────────────────────────────────────────
-    # Clean up Markdown fences and extract JSON
-    cleaned_output = raw_output.strip()
-    # Remove ```json or ``` from start and end
-    if cleaned_output.startswith("```"):
-        cleaned_output = cleaned_output.split("\n", 1)[-1]
-    if cleaned_output.endswith("```"):
-        cleaned_output = cleaned_output.rsplit("\n", 1)[0]
-    cleaned_output = cleaned_output.strip()
-
     try:
-        leads = json.loads(cleaned_output)
-        if not isinstance(leads, list):
-            leads = [leads]
-    except Exception as e:
-        logger.warning(f"Could not parse agent output as JSON: {e}. Wrapping raw output.")
-        logger.debug(f"Cleaned output was: {cleaned_output[:200]}...")
-        leads = [{"message": raw_output, "full_name": "Unknown", "company": "Unknown"}]
+        console.print("\n[bold green]Starting agent pipeline...[/bold green]\n")
+        result = crew.kickoff(inputs={
+            "industry":  industry,
+            "job_title": job_title,
+            "location":  location,
+            "limit":     limit,
+        })
 
-    guard          = SecurityGuard()
-    secured_leads  = guard.process(leads)
+        raw_output = result.raw if hasattr(result, "raw") else str(result)
+
+        # ── Phase 2: Security Guard ─────────────────────────────────────────────
+        # Clean up Markdown fences and extract JSON
+        cleaned_output = raw_output.strip()
+        if cleaned_output.startswith("```"):
+            cleaned_output = cleaned_output.split("\n", 1)[-1]
+        if cleaned_output.endswith("```"):
+            cleaned_output = cleaned_output.rsplit("\n", 1)[0]
+        cleaned_output = cleaned_output.strip()
+
+        try:
+            leads = json.loads(cleaned_output)
+            if not isinstance(leads, list):
+                leads = [leads]
+        except Exception as e:
+            logger.warning(f"Could not parse agent output as JSON: {e}. Wrapping raw output.")
+            logger.debug(f"Cleaned output was: {cleaned_output[:200]}...")
+            leads = [{"message": raw_output, "full_name": "Unknown", "company": "Unknown"}]
+
+        guard          = SecurityGuard()
+        secured_leads  = guard.process(leads)
+    except Exception as e:
+        logger.error(f"Pipeline run failed: {e}")
+        _set_last_run(status="failed", error=str(e),
+                      completed_at=datetime.now().isoformat())
+        raise
 
     # ── Save to DB ────────────────────────────────────────────────────────────
     console.print("\n[bold cyan]Pipeline Complete[/bold cyan]\n")
@@ -217,6 +326,22 @@ def run_pipeline(
     # Print final approved leads
     approved = [l for l in secured_leads if l.get("status") == "approved"]
     console.print(f"\n[bold green]{len(approved)}/{len(secured_leads)} messages approved and saved.[/bold green]")
+
+    # ── Capture for dashboard / API (works even without DB) ──────────────────
+    total = len(secured_leads)
+    _set_last_run(
+        status="completed",
+        leads=secured_leads,
+        summary={
+            "total": total,
+            "approved": len(approved),
+            "rejected": total - len(approved),
+            "avg_security_score": round(
+                sum(l.get("security_score", 0) for l in secured_leads) / total
+            ) if total else 0,
+        },
+        completed_at=datetime.now().isoformat(),
+    )
 
     return secured_leads
 

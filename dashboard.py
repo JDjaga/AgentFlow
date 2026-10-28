@@ -159,13 +159,9 @@ with st.sidebar:
 import psycopg2
 
 def get_db_connection():
-    return psycopg2.connect(
-        host=os.getenv("POSTGRES_HOST", "localhost"),
-        port=int(os.getenv("POSTGRES_PORT", 5432)),
-        dbname=os.getenv("POSTGRES_DB", "agentflow_db"),
-        user=os.getenv("POSTGRES_USER", "agentflow"),
-        password=os.getenv("POSTGRES_PASSWORD", "agentflow_secret"),
-    )
+    # Cloud-ready: honours DATABASE_URL (Neon/Supabase) or POSTGRES_* vars.
+    from db_config import get_conn
+    return get_conn()
 
 @st.cache_data(ttl=30)
 def fetch_leads(limit=20):

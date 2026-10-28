@@ -13,10 +13,11 @@ Scoring:
 
 import os
 import re
-import httpx
 import json
 from dataclasses import dataclass, field
 from loguru import logger
+
+from llm_config import llm_manager
 
 
 # ─── Known Injection Patterns ─────────────────────────────────────────────────
@@ -35,7 +36,7 @@ INJECTION_PATTERNS = [
 ]
 
 MAX_SCORE = 30
-OLLAMA_TIMEOUT = 30
+LLM_TIMEOUT = 30
 
 
 @dataclass
@@ -50,8 +51,9 @@ class InjectionCheck:
     """Two-layer prompt injection detector."""
 
     def __init__(self):
-        self.ollama_url  = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        self.ollama_model = os.getenv("OLLAMA_MODEL", "llama3.2")
+        # LLM access goes through llm_manager (OpenRouter→Groq→HF→Ollama failover),
+        # so this check works both locally and when cloud-hosted.
+        self.llm = llm_manager
 
     def run(self, message: str) -> InjectionResult:
         # Layer 1: Fast regex scan
@@ -90,13 +92,13 @@ class InjectionCheck:
         )
 
         try:
-            response = httpx.post(
-                f"{self.ollama_url}/api/generate",
-                json={"model": self.ollama_model, "prompt": prompt, "stream": False},
-                timeout=OLLAMA_TIMEOUT,
+            raw = self.llm.complete(
+                prompt,
+                system="You are a strict security classifier. Respond only with the requested JSON.",
+                max_tokens=200,
+                temperature=0.0,
+                timeout=LLM_TIMEOUT,
             )
-            response.raise_for_status()
-            raw = response.json().get("response", "")
 
             # Extract JSON from response
             json_match = re.search(r'\{.*\}', raw, re.DOTALL)
