@@ -52,5 +52,5 @@ def _get_llm() -> str:
     Returns the LLM identifier string for CrewAI 1.x (LiteLLM format).
     Phase 2 will have Ollama running locally.
     """
-    model = os.getenv("OLLAMA_MODEL", "llama3")
+    model = os.getenv("OLLAMA_MODEL", "llama3.2")
     return f"ollama/{model}"
