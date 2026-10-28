@@ -28,8 +28,13 @@ COPY . .
 
 EXPOSE 8001
 
-# Liveness probe hits the /status endpoint
+# Liveness probe hits the /status endpoint.
+# ${PORT:-8001} — locally we use 8001; Render/cloud inject their own $PORT
+# (e.g. 10000) and route traffic there, so we MUST honour it.
 HEALTHCHECK --interval=30s --timeout=8s --start-period=20s --retries=3 \
-    CMD curl -fsS http://localhost:8001/status || exit 1
+    CMD curl -fsS http://localhost:${PORT:-8001}/status || exit 1
 
-CMD ["uvicorn", "api.server:app", "--host", "0.0.0.0", "--port", "8001"]
+# JSON form (keeps Docker lint clean) wrapping sh -c so:
+#   - ${PORT} expands at runtime (Render sets it; local docker doesn't)
+#   - `exec` replaces the shell so uvicorn receives SIGTERM on shutdown
+CMD ["sh", "-c", "exec uvicorn api.server:app --host 0.0.0.0 --port ${PORT:-8001}"]

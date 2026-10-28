@@ -57,6 +57,16 @@ def serve_dashboard():
     """Open the Growth Engine dashboard in your browser."""
     return FileResponse(os.path.join(_static_dir, "dashboard.html"))
 
+@app.get("/", include_in_schema=False)
+def serve_root():
+    """Serve the dashboard at the bare domain too.
+
+    https://your-app.onrender.com/ must land on the dashboard (a reviewer
+    opens the root URL), and Render's default health-check path is "/" —
+    a 404 here would mark the whole deploy as failed.
+    """
+    return FileResponse(os.path.join(_static_dir, "dashboard.html"))
+
 @app.get("/architecture", include_in_schema=False)
 def serve_architecture():
     """Open the system architecture diagram in your browser."""
