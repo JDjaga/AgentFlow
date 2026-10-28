@@ -8,7 +8,7 @@ Requirements: Tesseract must be installed on the host machine.
   macOS:   brew install tesseract
   Ubuntu:  sudo apt install tesseract-ocr
   Windows: https://github.com/UB-Mannheim/tesseract/wiki
-           Add C:\Program Files\Tesseract-OCR to system PATH
+           Add "C:\\Program Files\\Tesseract-OCR" to system PATH
 
 CrewAI 1.x note: _run() accepts a single string argument (the image URL or path).
 """

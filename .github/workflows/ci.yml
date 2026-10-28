@@ -28,7 +28,7 @@ jobs:
           pip install flake8
           pip install python-dotenv pydantic loguru rich \
                       fastapi uvicorn httpx requests \
-                      psycopg2-binary sqlalchemy
+                      psycopg2-binary
 
       - name: Flake8 — syntax errors and undefined names only
         run: |
@@ -45,6 +45,9 @@ jobs:
           python -c "from security.checks.injection_check import InjectionCheck; print('✓ InjectionCheck')"
           python -c "from security.scorer import SecurityReport, SecurityScorer; print('✓ SecurityScorer')"
           python -c "from feedback.loop import FeedbackLoop; print('✓ FeedbackLoop')"
+          python -c "import db_config; print('✓ db_config →', db_config.describe_target())"
+          python -c "from migrations.run import migrate; print('✓ migrations.run (import only)')"
+          python -c "import scheduler; print('✓ scheduler')"
         env:
           PYTHONPATH: ${{ github.workspace }}
           POSTGRES_HOST: localhost
@@ -107,7 +110,7 @@ jobs:
           pip install --upgrade pip
           pip install fastapi uvicorn httpx \
                       python-dotenv pydantic loguru \
-                      psycopg2-binary sqlalchemy requests
+                      psycopg2-binary requests
 
       - name: FastAPI /status smoke test
         run: |
@@ -126,6 +129,14 @@ jobs:
           r = client.get('/status')
           assert r.status_code == 200, f'Expected 200, got {r.status_code}: {r.text}'
           print('✓ GET /status →', r.json())
+          # Scheduler tick must respond even with NO database (fresh clone / CI):
+          # it falls back to the in-memory job store, never 500s.
+          r = client.post('/scheduler/tick')
+          assert r.status_code == 200, f'Expected 200, got {r.status_code}: {r.text}'
+          print('✓ POST /scheduler/tick →', r.json())
+          r = client.get('/jobs')
+          assert r.status_code == 200, f'Expected 200, got {r.status_code}: {r.text}'
+          print('✓ GET /jobs →', r.json()['total'], 'jobs')
           "
         env:
           PYTHONPATH: ${{ github.workspace }}
