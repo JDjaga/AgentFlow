@@ -77,31 +77,49 @@ AgentFlow/
 │   └── pipeline_tasks.py # CrewAI task definitions with context chaining
 ├── security/
 │   ├── guard.py          # SecurityGuard — orchestrates all checks
-│   ├── scorer.py         # SecurityScorer — returns SecurityReport
+│   ├── scorer.py         # SecurityScorer — 4 checks incl. tone (10 pts)
 │   ├── checks/
 │   │   ├── pii_check.py          # Regex PII detection (40 pts)
 │   │   ├── injection_check.py    # Regex + LLM semantic injection check (30 pts)
-│   │   ├── hallucination_check.py# LLM cross-reference check (20 pts)
-│   │   └── tone_check.py         # LLM tone appropriateness (10 pts)
+│   │   └── hallucination_check.py# LLM cross-reference check (20 pts)
 │   └── guardrails/
 │       ├── config.yml    # NeMo Guardrails config (portfolio documentation)
 │       └── main.co       # NeMo Guardrails colang rules
 ├── feedback/
 │   └── loop.py           # FeedbackLoop — rejected messages → Writer context
 ├── api/
-│   └── server.py         # FastAPI server — /run /status /leads /runs /approve
+│   └── server.py         # FastAPI — /run /status /leads /schedule /scheduler/tick ...
 ├── static/
-│   └── dashboard.html    # Live dashboard — 4 pages, full navigation
+│   ├── dashboard.html    # Live dashboard — 4 pages, PDF export, mobile-ready
+│   └── architecture.html # System architecture diagram
 ├── database/
-│   └── init.sql          # PostgreSQL schema
+│   └── init.sql          # PostgreSQL schema (idempotent — auto-applied on startup)
+├── migrations/
+│   └── run.py            # Startup migration — creates tables on a fresh cloud DB
 ├── data/
-│   └── mock_leads.csv    # 10 sample SaaS leads
+│   └── mock_leads.csv    # Sample SaaS leads
 ├── n8n/
-│   └── agentflow_workflow.json  # Importable n8n workflow
+│   └── agentflow_workflow.json  # Importable n8n workflow (env-configurable URLs)
+├── tests/
+│   └── test_security.py  # 15 unit tests (run in CI)
+├── .github/workflows/
+│   └── ci.yml            # CI — flake8, import checks, tests, API smoke test
+├── config/
+│   └── agents.yaml       # Agent role definitions
 ├── crew.py               # Main pipeline entry point
+├── scheduler.py          # Job store — Postgres + in-memory fallback
+├── llm_config.py         # 7-provider LLM failover chain (cloud-hostable)
+├── db_config.py          # Single DB config — DATABASE_URL / POSTGRES_* + SSL
+├── dashboard.py          # Legacy Streamlit dashboard (optional)
 ├── docker-compose.yml    # PostgreSQL + n8n containers
-├── requirements.txt      # Python dependencies
-└── .env.example          # Environment variable template
+├── Dockerfile            # Production image (VPS / any container host)
+├── Procfile              # Heroku/Render-style process definition
+├── render.yaml           # Render.com blueprint (free tier, no card)
+├── requirements.txt      # Python dependencies (cloud build)
+├── requirements-legacy.txt # Extras for the optional Streamlit dashboard
+├── HOSTING.md            # Step-by-step free-tier deploy guide
+├── .env.example          # Environment variable template
+└── README.md             # This file (CI badge = last green build)
 ```
 
 ---
